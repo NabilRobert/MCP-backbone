@@ -1,0 +1,70 @@
+# pyright: basic
+# (asyncpg ships no type stubs; this file's only job is a handful of raw
+# asyncpg calls, so strict mode here is mostly noise.)
+"""Operator-only CLI to provision a read-only Postgres role on a target
+database, for use as that workspace's DataSourceConnection.
+
+Run this AFTER the target dataset is fully loaded. GRANT ... ON ALL TABLES
+IN SCHEMA only covers tables that exist at the moment it runs, not ones
+added afterward (confirmed by testing: a table created after provisioning
+was invisible to the role until the grant was re-run). The
+ALTER DEFAULT PRIVILEGES line below only extends that to tables created
+*later by this same admin connection* -- not to tables added by a
+different role that owns the schema.
+
+Also defense-in-depth only, same caveat as Phase 6 spike 1:
+REVOKE EXECUTE FROM PUBLIC only protects functions that exist at the time
+this runs, not ones added later by whoever owns the target schema. The
+real defense against a SECURITY DEFINER bypass is the function-call
+allowlist in app/query/validation.py."""
+
+import argparse
+import asyncio
+import secrets
+
+import asyncpg
+
+
+async def provision(admin_dsn: str, role_name: str, database: str, schema: str) -> str:
+    password = secrets.token_urlsafe(24)
+    conn = await asyncpg.connect(admin_dsn)
+    try:
+        await conn.execute(f'drop role if exists "{role_name}"')
+        await conn.execute(f"create role \"{role_name}\" login password '{password}'")
+        await conn.execute(f'grant connect on database "{database}" to "{role_name}"')
+        await conn.execute(f'grant usage on schema "{schema}" to "{role_name}"')
+        await conn.execute(f'grant select on all tables in schema "{schema}" to "{role_name}"')
+        await conn.execute(
+            f'alter default privileges in schema "{schema}" '
+            f'grant select on tables to "{role_name}"'
+        )
+        await conn.execute(f'revoke execute on all functions in schema "{schema}" from public')
+        await conn.execute(
+            f'alter default privileges in schema "{schema}" revoke execute on functions from public'
+        )
+    finally:
+        await conn.close()
+    return password
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--admin-dsn", required=True, help="Superuser connection string")
+    parser.add_argument("--role-name", required=True)
+    parser.add_argument("--database", required=True)
+    parser.add_argument("--schema", default="public")
+    args = parser.parse_args()
+
+    password = asyncio.run(provision(args.admin_dsn, args.role_name, args.database, args.schema))
+    print(f"Role '{args.role_name}' created on database '{args.database}'.")
+    print(f"Password (shown once, store it now): {password}")
+    print(
+        "Note: both the SELECT grant and the EXECUTE revoke only reliably "
+        "cover the current moment and tables/functions created later by "
+        "THIS admin connection. See the module docstring for what that "
+        "does and doesn't cover."
+    )
+
+
+if __name__ == "__main__":
+    main()
