@@ -100,6 +100,37 @@ stays robust regardless of what the target schema's owner does later.
 Revoking `EXECUTE` from `PUBLIC` at role-setup time is kept as one more
 layer of defense-in-depth, not the primary defense.
 
+Also verified empirically: the DB-level read-only role *does* correctly
+block a write hidden inside a CTE (`WITH x AS (INSERT ... RETURNING id)
+SELECT * FROM x`) and `SELECT INTO` (creates a new table — blocked by
+missing `CREATE` on the schema, a different privilege check than
+`INSERT`). Postgres checks privileges per-operation regardless of nesting,
+so the DB role is a solid backstop for these two cases even though (see
+spike 2) a naive app-level check would miss them. The one case the DB role
+cannot save you from is `SECURITY DEFINER` functions, since those run as
+the function owner, not the caller.
+
+### Spike 2 result: naive top-level check is insufficient, recursive check works
+
+Parsed a set of disguised-write queries with sqlglot against the Postgres
+dialect. Checking only the top-level statement type (`type(parsed[0]) ==
+Select`) is **not enough**: `WITH x AS (INSERT ... RETURNING id) SELECT *
+FROM x`, the same with `UPDATE`, and `SELECT ... INTO new_table` all parse
+with a top-level type of `Select` — a write hidden inside a CTE or an
+implicit `CREATE TABLE` would pass a naive check.
+
+**Fix, verified working:** walk the *entire* parsed tree with
+`parsed.find_all(exp.Insert, exp.Update, exp.Delete, exp.Into, exp.Create,
+exp.Drop, exp.Alter)` and reject if anything is found, regardless of
+nesting depth — tested against a CTE two levels deep, still caught
+correctly. Multi-statement stacking (`select 1; drop table ...`) and
+comment-based injection are both already caught by requiring exactly one
+parsed statement (`len(sqlglot.parse(sql)) == 1`).
+
+**Updated Slice B requirement:** the validator is a single-statement check
++ a recursive write-node check + a function-call allowlist (spike 1) — not
+just "is this a `SELECT`."
+
 ## Walking skeleton
 
 The thinnest end-to-end slice, deployed to the real VPS (not just localhost):

@@ -15,7 +15,7 @@ path through every layer, not "all the backend" then "all the frontend")
 | Slice | What it proves, end to end | Risk/value | Est. |
 |---|---|---|---|
 | **A. Walking skeleton** | Hardcoded key → list tables → run one query → audit row appears → on the real VPS | Do first — de-risks everything else | 0.5–1 day |
-| **B. Real safety + execution + audit** | Arbitrary queries correctly validated (sqlglot, **including a function-call allowlist — see Phase 6 spike 1 result**), cost-checked, timed out, executed via the read-only role, always producing a correct audit record | Highest risk, highest value — run the Phase 6 spikes as part of starting this slice | 1.5–2.5 days |
+| **B. Real safety + execution + audit** | Arbitrary queries correctly validated (sqlglot: single-statement check + **recursive write-node check** + **function-call allowlist** — see Phase 6 spikes 1 and 2), cost-checked, timed out, executed via the read-only role, always producing a correct audit record | Highest risk, highest value — run the Phase 6 spikes as part of starting this slice | 1.5–2.5 days |
 | **C. Real auth** | Multiple workspaces, real key issuance/revocation (CLI), rate limiting enforced | Dependency for everything else, lower risk | 0.5–1 day |
 | **D. Full MCP tool surface + schema cache** | `describe_table`/`sample_rows`/cached `list_tables`, tested against a real AI client, not just a script | Medium risk (MCP integration surprises) | 1–1.5 days |
 | **E. Text-to-SQL benchmark** | Eval set built, run, accuracy measured, method published | Must-have | 1.5–2.5 days |
