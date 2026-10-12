@@ -30,6 +30,11 @@ line-length = 100
 
 [tool.pyright]
 typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [build-system]
 requires = ["hatchling"]
