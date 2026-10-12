@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 11863be40c73
+Revision ID: 072ff1f9b9d6
 Revises: 
-Create Date: 2026-10-12 23:21:23.026727
+Create Date: 2026-10-12 23:23:15.885739
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '11863be40c73'
+revision: str = '072ff1f9b9d6'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -30,7 +30,7 @@ def upgrade() -> None:
     op.create_table('workspaces',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('api_keys',
@@ -38,8 +38,8 @@ def upgrade() -> None:
     sa.Column('workspace_id', sa.Uuid(), nullable=False),
     sa.Column('key_hash', sa.String(), nullable=False),
     sa.Column('status', sa.String(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('revoked_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -69,7 +69,7 @@ def upgrade() -> None:
     op.create_table('rate_limit_counters',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('workspace_id', sa.Uuid(), nullable=False),
-    sa.Column('window_started_at', sa.DateTime(), nullable=False),
+    sa.Column('window_started_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('count', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -78,7 +78,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('workspace_id', sa.Uuid(), nullable=False),
     sa.Column('table_metadata_json', sa.String(), nullable=False),
-    sa.Column('cached_at', sa.DateTime(), nullable=False),
+    sa.Column('cached_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -90,7 +90,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(), nullable=False),
     sa.Column('cost_estimate', sa.Double(), nullable=True),
     sa.Column('rejection_reason', sa.String(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['data_source_connection_id'], ['data_source_connections.id'], ),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ),
     sa.PrimaryKeyConstraint('id')
