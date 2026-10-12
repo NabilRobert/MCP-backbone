@@ -12,4 +12,4 @@ class Settings(BaseSettings):
     demo_rate_limit: int = 5
 
 
-settings = Settings()
+settings = Settings()  # pyright: ignore[reportCallIssue] -- fields load from the environment
