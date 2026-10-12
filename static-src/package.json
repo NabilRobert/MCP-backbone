@@ -6,7 +6,7 @@
     "watch": "esbuild main.ts --bundle --outfile=../app/console/static/main.js --watch"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.6.0"
   }
 }
