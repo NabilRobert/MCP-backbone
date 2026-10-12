@@ -1,6 +1,10 @@
 # Phase 1 — Problem Brief
 
-**Project:** Jarvis (umbrella AI assistant) — v1 is the database MCP server, the backbone proof.
+**Project:** a standalone, production-grade read-only database MCP
+server — one of three focused portfolio pieces (this project, an eval
+harness, a Beobot case study), not a piece of a larger "Jarvis" platform
+shown to reviewers. See `portfolio-plan.md`: depth and finish on a small
+number of things beats breadth on one sprawling platform.
 
 ## Problem
 
@@ -9,15 +13,19 @@ reviewer *verify*, rather than take on faith, that he can design and reason abou
 a safe, stateful, multi-tool AI system under real constraints. Existing evaluation
 methods (resume keywords, algorithmic live-coding rounds, small take-homes, verbal
 project walkthroughs) can't surface this kind of judgment, and tutorial-tier CRUD
-projects don't exercise it in the first place.
+projects don't exercise it in the first place. A broad multi-surface AI assistant
+platform doesn't fix this either — it reads as the most common AI portfolio
+project, breadth makes it harder to evaluate, not easier, and it's indistinguishable
+from a weekend vibecoded demo. A small project a reviewer can actually finish
+reading is the stronger signal.
 
 ## Affected parties
 
 | Party | Wants |
 |---|---|
-| Arthur (builder) | A flagship portfolio project with genuine backend depth (orchestration, tool routing, state, safety) he can defend under questioning |
+| Arthur (builder) | A finished, standalone project with genuine backend depth (safety, validation, audit) he can defend under questioning — one of three focused pieces, not a single large platform |
 | Reviewer / senior engineer | A fast, reliable signal — in ~15 minutes of reading — of whether this candidate makes real architectural tradeoffs, or just assembles tutorials |
-| Future Arthur | A working backbone (Jarvis) he can actually extend with new connectors/projects, not a one-off demo |
+| Future Arthur | Clean, reusable infrastructure *if* a later independent project happens to need a database MCP server — a possible side-benefit, not this project's stated purpose or a promised roadmap |
 
 No conflict identified between these three yet — revisit if later phases reveal
 tension (e.g. "impressive to reviewers" pulling against "actually finishable
@@ -55,24 +63,16 @@ not just the result.
   already covers that ground).
 - No LLM training or fine-tuning.
 - A **minimal-then-richer web console** (API-key management + polling-based
-  audit-trail dashboard) is in scope for v1 — see Phase 2 for how this got
-  pulled forward from the original "next phase" plan.
+  audit-trail dashboard) is in scope — see Phase 2 for how this was decided.
 - **Live/real-time monitoring** (streaming view of a query as it executes) is
-  explicitly deferred to after v1 — same bucket as the mobile app.
-- No WhatsApp/voice interface yet — the step after web/mobile.
+  explicitly out of scope — the console stays polling-based.
+- No mobile app, no WhatsApp/voice interface, no multi-surface platform —
+  this project is the database MCP server and nothing else.
 - No production on-call/uptime SLA.
 - Open/unresolved: third-party plugin authoring, outbound connectors for
-  firewalled databases — still roadmap-only.
-
-## Long-term vision (context, not current scope)
-
-Jarvis as an umbrella assistant. Sequencing: **v1** proves the backbone itself
-(MCP connector, orchestration, tool routing, safety/audit) plus a polling-based
-web console to view what it's doing. **Next**, a richer web app and mobile app
-add live/real-time visualization and broader surfaces. **After that**, a
-WhatsApp interface adds voice note/chat access.
+  firewalled databases — still roadmap-only, and not a stated commitment.
 
 ## Cost of doing nothing
 
 A weaker portfolio and CV/website heading into job fairs and future
-applications — fewer flagship projects demonstrating backend depth.
+applications — fewer finished projects demonstrating backend depth.

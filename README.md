@@ -1,10 +1,9 @@
-# Jarvis — Database MCP (v1)
+# Database MCP Server
 
-A read-only database MCP server that lets an AI client explore a database's
-schema and run safe, read-only SQL queries against it — with every attempt
-validated, cost-checked, and logged. This is the backbone proof for a larger
-umbrella assistant (Jarvis); it stands alone, imports nothing from any future
-Jarvis codebase, and is reachable only over its own protocol/API.
+A standalone, read-only database MCP server that lets an AI client explore
+a database's schema and run safe, read-only SQL queries against it — with
+every attempt validated, cost-checked, and logged. Built to be small enough
+to read end to end, not as a piece of a larger platform.
 
 ## Planning
 
