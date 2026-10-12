@@ -22,8 +22,11 @@ alongside this README:
 
 ## Status
 
-Scaffolded, not yet implemented. Currently starting **Slice A** (the walking
-skeleton) from phase-7-slices-plan.md.
+**Slice A (walking skeleton)** done locally: API key auth, `list_tables`,
+and `run_query` work end to end through the real MCP protocol, verified
+against a real Postgres instance with an integration test suite. No
+sqlglot validation, cost check, or read-only DB role yet -- that's Slice B,
+which also needs the Phase 6 spikes run first. Not yet deployed to the VPS.
 
 ## Layout
 
