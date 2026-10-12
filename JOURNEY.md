@@ -104,3 +104,47 @@ JSON)` gives a clean, parseable `Total Cost` figure, and a scoped
 done yet: picking an actual cost threshold, since that needs the real
 public demo dataset, which hasn't been chosen/loaded yet. Logged as a
 known gap rather than guessed at.
+
+## 2026-10-13 (continued) — Slice B: the real safety layer
+
+Built the validator exactly as the spikes specified: single-statement
+check, a recursive walk for any write-node type (not just the top-level
+statement type), and a function-call allowlist that defaults to empty —
+sqlglot gives every function it recognizes (`COUNT`, `COALESCE`,
+`DATE_TRUNC`, ...) its own node type, so anything that falls back to
+`exp.Anonymous` is either user-defined or an unmodeled builtin like
+`pg_sleep`, and both get rejected by default. Verified against the full
+disguised-write battery from the spikes, plus a set of common analytical
+functions to confirm nothing legitimate gets false-rejected.
+
+Wired validation, the `EXPLAIN` cost check, and the statement timeout into
+`run_query`, and found two more real bugs by actually running it:
+
+- `EXPLAIN` on a query referencing a nonexistent table raises a plain DB
+  error, not `QueryRejected` — the first version let that propagate
+  uncaught instead of becoming a normal "errored" audit row.
+- Needed to specifically exercise the timeout-classification path (not
+  just assume it): temporarily allowed `pg_sleep` through the allowlist,
+  confirmed a query gets killed at the configured timeout, classified as
+  `timed_out` (not `errored`), and is *not* retried — retrying a slow
+  query just repeats the cost, which was the Phase 4 decision.
+
+Built the read-only role provisioning script to match what spike 1 tested
+manually by hand, and in doing so found a third real gotcha:
+`GRANT ... ON ALL TABLES IN SCHEMA` is a point-in-time grant — a table
+created *after* provisioning was completely invisible to the role,
+permission-denied on a plain `SELECT`, not just writes. Fixed with
+`ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES`, which extends the
+grant to tables created later by the same admin connection — documented,
+not silently assumed, that it does *not* cover tables added by a
+different role that owns the schema. Confirmed by actually creating a
+table after provisioning and checking both the role's read access and
+that direct writes were still blocked.
+
+Running theme across both build days: every non-trivial claim in this
+project ("the role is read-only," "the validator catches disguised
+writes," "the grant covers future tables") turned out to have a real edge
+where the naive version was wrong, and every one of them was caught by
+actually executing something against a real database, never by reasoning
+about it on paper. That's probably the single most honest thing to say
+about this project if asked "what did you learn building it."
