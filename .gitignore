@@ -8,4 +8,4 @@ node_modules/
 app/console/static/*.js
 app/console/static/*.js.map
 .DS_Store
-phase-*.md
+# phase-*.md
