@@ -20,6 +20,9 @@ alongside this README:
 - [phase-6-risks-skeleton.md](phase-6-risks-skeleton.md)
 - [phase-7-slices-plan.md](phase-7-slices-plan.md)
 
+The day-by-day build log — what broke, what surprised me, why decisions
+landed where they did — is in [JOURNEY.md](JOURNEY.md).
+
 ## Status
 
 **Slice A (walking skeleton)** done locally: API key auth, `list_tables`,
