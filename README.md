@@ -19,6 +19,9 @@ alongside this README:
 - [phase-6-risks-skeleton.md](phase-6-risks-skeleton.md)
 - [phase-7-slices-plan.md](phase-7-slices-plan.md)
 
+What this server defends against, how, and what it doesn't is in
+[THREAT_MODEL.md](THREAT_MODEL.md).
+
 The day-by-day build log — what broke, what surprised me, why decisions
 landed where they did — is in [JOURNEY.md](JOURNEY.md).
 
