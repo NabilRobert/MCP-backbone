@@ -8,6 +8,7 @@ from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.auth.models import Workspace
+from app.auth.rate_limit import RateLimitExceeded, check_and_increment
 from app.config import settings
 from app.query.cost_check import check_cost
 from app.query.models import DataSourceConnection, QueryExecution
@@ -88,6 +89,14 @@ async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
 
 async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> dict[str, Any]:
     data_source = await _get_data_source(session, workspace)
+
+    try:
+        await check_and_increment(
+            session, workspace, settings.demo_rate_limit, settings.demo_rate_limit_window_seconds
+        )
+    except RateLimitExceeded as exc:
+        await _write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
+        return {"status": "rejected", "rows": [], "error": exc.reason}
 
     try:
         normalized_sql = validate_and_normalize(sql)
