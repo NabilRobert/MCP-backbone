@@ -148,3 +148,31 @@ where the naive version was wrong, and every one of them was caught by
 actually executing something against a real database, never by reasoning
 about it on paper. That's probably the single most honest thing to say
 about this project if asked "what did you learn building it."
+
+## 2026-10-13 (continued) — Repositioning, then Slice C
+
+Reopened Phase 1. A separate planning pass (`portfolio-plan.md`) concluded
+that a broad "Jarvis" assistant platform is the wrong portfolio piece — it
+reads as the most common AI project, breadth is hard to evaluate, and it's
+indistinguishable from a weekend demo. The stronger move: three small,
+*finished* things (this MCP server, an eval harness, a real-system case
+study) instead of one sprawling platform. This project was never actually
+built as part of a bigger platform's code — "stands alone, imports
+nothing" was decided before this build started — so the change was almost
+entirely about framing, not architecture: dropped the "backbone for
+Jarvis" language from the brief and the README, removed the long-term
+web/mobile/WhatsApp vision section outright. Reusing this later is now a
+possible side-benefit, never a stated roadmap.
+
+Closed the two gaps that repositioning's own checklist surfaced: a CI
+pipeline and an explicit threat model doc. Verified the CI workflow
+properly before trusting it — ran the exact same install/lint/typecheck/
+test sequence locally against a fresh venv and a clean Postgres container
+first, rather than writing YAML and hoping.
+
+Then Slice C turned up two more real gaps, this time by reading the code
+against the plan rather than by running it: `RateLimitCounter` had existed
+as a model since Phase 3 but was never actually checked or incremented
+anywhere, and there was a script to issue API keys but no way to revoke
+one. Both fixed and verified — a low rate limit correctly cuts off
+requests mid-run, and a revoked key immediately fails authentication.

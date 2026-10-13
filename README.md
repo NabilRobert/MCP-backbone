@@ -27,15 +27,16 @@ landed where they did — is in [JOURNEY.md](JOURNEY.md).
 
 ## Status
 
-**Slice A (walking skeleton)** and **Slice B (safety layer)** done
-locally: API key auth, `list_tables`, and a fully validated `run_query`
-(sqlglot checks, `EXPLAIN` cost check, statement timeout, read-only role
+**Slices A–C** done locally: API key auth (issuance + revocation), rate
+limiting, `list_tables`, and a fully validated `run_query` (sqlglot
+checks, `EXPLAIN` cost check, statement timeout, read-only role
 provisioning) all work end to end through the real MCP protocol, verified
-against a real Postgres instance with 22 passing tests. Not yet deployed
-to the VPS -- Arthur deploys by pulling from this repo.
+against a real Postgres instance with 24 passing tests, CI running on
+every push. Not yet deployed to the VPS -- Arthur deploys by pulling from
+this repo.
 
-Next: Slice C (real multi-workspace auth beyond the CLI seed script) and
-Slice D (full tool surface against a real AI client).
+Next: Slice D (full tool surface -- `describe_table`/`sample_rows` backed
+by `SchemaCache` -- against a real AI client, not just a script).
 
 ## Layout
 
