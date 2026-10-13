@@ -37,7 +37,7 @@ def _asyncpg_cause(exc: BaseException) -> BaseException | None:
     return getattr(orig, "__cause__", None)
 
 
-async def _get_data_source(session: AsyncSession, workspace: Workspace) -> DataSourceConnection:
+async def get_data_source(session: AsyncSession, workspace: Workspace) -> DataSourceConnection:
     result = await session.execute(
         select(DataSourceConnection).where(DataSourceConnection.workspace_id == workspace.id)
     )
@@ -73,7 +73,7 @@ async def _write_audit(
 
 
 async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
-    data_source = await _get_data_source(session, workspace)
+    data_source = await get_data_source(session, workspace)
     engine = create_async_engine(data_source.connection_url)
     try:
         async with engine.connect() as conn:
@@ -88,7 +88,7 @@ async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
 
 
 async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> dict[str, Any]:
-    data_source = await _get_data_source(session, workspace)
+    data_source = await get_data_source(session, workspace)
 
     try:
         await check_and_increment(
