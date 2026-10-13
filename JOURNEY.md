@@ -203,3 +203,50 @@ trying to recover from a mistake (try a different key vs. give up), and
 it would have shipped silently wrong if the first test had only used the
 convenience method and called it a day.
 
+## 2026-10-13 (continued) — framework choice, then Slice E
+
+Arthur pushed back on hand-rolling the benchmark's agent loop: "seems
+mighty unwise to not use a framework." Picked PydanticAI specifically for
+its native MCP client support, but spiked it before committing rather
+than taking the fit on faith — connected `fastmcp.Client` (PydanticAI's
+underlying MCP client) directly to the in-process `MCPServer` object, no
+subprocess needed, and it listed and called all four tools correctly, a
+bad key surfacing the exact `ToolError` message from Slice D through yet
+another independent client implementation.
+
+Built the rest of Slice E: a small synthetic storefront dataset
+(hand-generated, not sourced from anywhere real — honesty constraint)
+because a real public dataset needs downloading and this session has no
+internet access; ten hand-written eval questions; an execution-accuracy
+grader; the benchmark runner itself.
+
+Two real findings while building the runner, both the kind that only show
+up by actually running the thing:
+
+1. **Grading by column name is wrong.** First version compared result
+   rows as key-value pairs, which would fail a correct answer purely for
+   using a different (equally valid) column alias — `AS revenue` vs
+   `AS total`. Fixed to compare by value in column order instead, and
+   wrote down the real limitation that creates (column *order* still
+   matters) rather than quietly shipping a grader that looked stricter
+   than it should be.
+2. **Putting the API key in the prompt and hoping the model copies it
+   into every tool call is fragile and a bad pattern.** Found this by
+   testing with PydanticAI's `Agent('test')` — a free, no-API-key stub
+   model — which doesn't read the prompt at all, so every tool call
+   failed with "invalid or revoked API key." The real fix wasn't "tell
+   the model more clearly," it was to stop asking the model to handle a
+   credential at all: `MCPToolset`'s `process_tool_call` hook injects the
+   real key into every call before it reaches the server, so the model
+   never sees or needs to touch it.
+
+`Agent('test')` turned out to be the right tool for verifying everything
+*except* real model intelligence without spending a cent or needing
+Arthur's key yet: confirmed the full `run()` orchestration — auth
+injection, tool error handling, SQL/result extraction from the message
+history, grading, and `BenchmarkResult` persistence — all execute
+correctly end to end. The only thing not yet verified is whether a real
+model actually answers the questions right, which needs Arthur's own
+Anthropic key and is explicitly his cost to incur, not something to spend
+without asking.
+

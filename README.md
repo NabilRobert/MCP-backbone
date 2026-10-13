@@ -27,18 +27,27 @@ landed where they did — is in [JOURNEY.md](JOURNEY.md).
 
 ## Status
 
-**Slices A–D** done locally: API key auth (issuance + revocation), rate
-limiting, and all four MCP tools (`list_tables`, `describe_table`,
-`sample_rows`, `run_query`) work end to end through the real MCP
-protocol -- verified via an in-memory client/server session, not just the
-SDK's raise-on-error convenience method, which caught a real bug in how
-tool errors reached the model. 29 passing tests against a real Postgres
-instance, CI running on every push. Not yet deployed to the VPS -- Arthur
-deploys by pulling from this repo. Not yet tested against a real AI
-client (e.g. Claude Desktop) over actual stdio -- only the in-memory
-protocol path so far.
+**Slices A–E** built. Auth (issuance + revocation), rate limiting, and
+all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
+`run_query`) work end to end through the real MCP protocol -- verified
+via an in-memory client/server session, not just the SDK's raise-on-error
+convenience method, which caught a real bug in how tool errors reached
+the model. 34 passing tests against a real Postgres instance, CI running
+on every push. Not yet deployed to the VPS -- Arthur deploys by pulling
+from this repo. Not yet tested against a real AI client (e.g. Claude
+Desktop) over actual stdio -- only the in-memory protocol path so far.
 
-Remaining: Slice E (text-to-SQL benchmark) and Slice F (red-team suite).
+**Slice E (benchmark) is built and verified short of an actual model
+call**: `scripts/run_benchmark.py` runs a PydanticAI agent against this
+server as a real MCP client, grading by execution accuracy against ten
+hand-written questions over a synthetic demo dataset
+(`scripts/load_demo_dataset.py`). Every piece short of real model
+intelligence is confirmed working (see JOURNEY.md) using PydanticAI's
+free `TestModel` stub. Running it for real needs an `ANTHROPIC_API_KEY`
+in `.env` -- Arthur's own key, his own cost, not something to spend
+without asking.
+
+Remaining: Slice F (red-team suite, shrink-not-cut if time is short).
 
 ## Layout
 
