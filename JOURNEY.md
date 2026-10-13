@@ -250,3 +250,38 @@ model actually answers the questions right, which needs Arthur's own
 Anthropic key and is explicitly his cost to incur, not something to spend
 without asking.
 
+## 2026-10-13 (continued) — the CI failure that wasn't about the API key
+
+Arthur got a GitHub email: run failed. First instinct to check was the
+obvious one (missing `ANTHROPIC_API_KEY`), but that's a runtime concern —
+CI only lints, type-checks, and runs the test suite, none of which calls
+an LLM. The real cause was underneath the whole CI setup the entire time:
+`pyproject.toml`'s `[tool.pyright]` pins `venvPath="." venv=".venv"` for
+local dev, but the CI workflow installed dependencies straight into the
+runner's system Python — no `.venv` folder ever existed there. Pyright
+couldn't find the configured venv, fell back to nothing resolvable, and
+failed with 160 errors, "Import could not be resolved" on everything
+including `pytest` itself.
+
+The uncomfortable part: this had almost certainly been broken since the
+very first CI run, and my own "verification" of the workflow back when I
+built it never caught it. I'd tested by running `pyright` from inside
+this project directory — which *always* finds the real `./.venv` and
+resolves against it, regardless of which pyright binary or throwaway
+venv I thought I was testing with, because pyright's venv lookup goes by
+configured path, not by which interpreter launched it. The bug was
+invisible to any test run from this directory, by construction.
+
+Found and fixed it properly: exported a clean `git archive` checkout
+with deliberately no `.venv` anywhere, reproduced the exact 160-error
+failure there, fixed the workflow to create `.venv` at the path the
+config expects, and reproduced clean again in the same disposable
+checkout before pushing. Also rolled the `benchmark` extra into CI's
+install step while at it, so `scripts/run_benchmark.py`'s pydantic_ai/
+fastmcp imports get checked too, not just the core app.
+
+The lesson that'll stick: "I tested it locally" is only as good as
+whether the local test can actually fail the way the real environment
+would. A local check that structurally can't reproduce the failure mode
+isn't verification, it's theater.
+
