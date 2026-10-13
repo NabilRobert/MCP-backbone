@@ -27,16 +27,18 @@ landed where they did — is in [JOURNEY.md](JOURNEY.md).
 
 ## Status
 
-**Slices A–C** done locally: API key auth (issuance + revocation), rate
-limiting, `list_tables`, and a fully validated `run_query` (sqlglot
-checks, `EXPLAIN` cost check, statement timeout, read-only role
-provisioning) all work end to end through the real MCP protocol, verified
-against a real Postgres instance with 24 passing tests, CI running on
-every push. Not yet deployed to the VPS -- Arthur deploys by pulling from
-this repo.
+**Slices A–D** done locally: API key auth (issuance + revocation), rate
+limiting, and all four MCP tools (`list_tables`, `describe_table`,
+`sample_rows`, `run_query`) work end to end through the real MCP
+protocol -- verified via an in-memory client/server session, not just the
+SDK's raise-on-error convenience method, which caught a real bug in how
+tool errors reached the model. 29 passing tests against a real Postgres
+instance, CI running on every push. Not yet deployed to the VPS -- Arthur
+deploys by pulling from this repo. Not yet tested against a real AI
+client (e.g. Claude Desktop) over actual stdio -- only the in-memory
+protocol path so far.
 
-Next: Slice D (full tool surface -- `describe_table`/`sample_rows` backed
-by `SchemaCache` -- against a real AI client, not just a script).
+Remaining: Slice E (text-to-SQL benchmark) and Slice F (red-team suite).
 
 ## Layout
 

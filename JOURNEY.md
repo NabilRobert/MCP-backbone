@@ -176,3 +176,30 @@ as a model since Phase 3 but was never actually checked or incremented
 anywhere, and there was a script to issue API keys but no way to revoke
 one. Both fixed and verified — a low rate limit correctly cuts off
 requests mid-run, and a revoked key immediately fails authentication.
+
+## 2026-10-13 (continued) — Slice D, and the most interesting bug yet
+
+Wired `describe_table`/`sample_rows` to the `SchemaCache`, then found the
+most instructive bug of the whole build while testing them. Calling the
+tools directly via `MCPServer.call_tool()` — the SDK's convenience Python
+method — a bad table name or a bad API key crashed with a raw traceback.
+Read the SDK's own exception docstring before assuming that was the real
+behavior: `call_tool()` is explicitly documented to *raise* `ToolError`
+rather than convert it, because it's a shortcut for in-process callers,
+not the actual client-facing path. The real path is the low-level
+server's request handler, which does catch `ToolError` and convert it to
+a graceful `is_error=True` result.
+
+Proved that distinction rather than taking the docstring's word for it:
+wired an in-memory `ClientSession` to the server's actual `_lowlevel_server.run()`
+over real (if in-process) streams — the same code path a real AI client
+exercises — and confirmed the difference firsthand. Through that real
+path, an unhandled `AuthenticationError`/`QueryExecutionError` became a
+generic `"Error executing tool X"` with no detail reaching the model;
+after wrapping them as `ToolError`, the same failure came through as
+`"invalid or revoked API key"` or `"table 'x' not found"` — the actual
+reason, not a crash. That's a meaningful difference for a real AI client
+trying to recover from a mistake (try a different key vs. give up), and
+it would have shipped silently wrong if the first test had only used the
+convenience method and called it a day.
+
