@@ -105,6 +105,25 @@ variables, not a dedicated secrets manager (Vault, etc.).
 **Revisit if:** This system ever handles real external users' credentials, or
 runs at a scale/trust level where env-var secrets become a real risk.
 
+### ADR-006: PydanticAI for the Slice E benchmark's test-agent loop
+**Context:** The text-to-SQL benchmark (Slice E) needs an LLM-driven client
+that explores the schema and writes SQL — hand-rolling raw API calls was
+the alternative, and the project already leans on standard libraries rather
+than reinventing them (FastAPI, SQLAlchemy, sqlglot).
+**Decision:** PydanticAI, specifically for its native MCP client support —
+an agent can connect to this server as a real MCP client and use its tools
+directly, rather than wrapping raw SQL execution in a separate code path.
+**Verified before deciding:** `fastmcp.Client` (PydanticAI's underlying MCP
+client) connects directly to the in-process `MCPServer` object, correctly
+lists and calls all four tools, and an invalid API key surfaces as the
+exact `ToolError` message from Slice D — confirmed through a second,
+independent client implementation, not assumed from the raw SDK test alone.
+**Consequences:** The benchmark doubles as another real test of the server
+through the actual protocol. Adds one dependency, isolated to an optional
+`benchmark` extra so the core server install stays untouched.
+**Revisit if:** PydanticAI's MCP client behavior diverges from the official
+SDK's in some edge case the benchmark depends on.
+
 ## Reversible vs. irreversible
 
 - **Cheap to change later:** console templating choice, UI styling, exact
