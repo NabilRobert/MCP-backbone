@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     explain_timeout_seconds: int = 2
     cost_threshold: int = 100_000
     demo_rate_limit: int = 5
+    demo_rate_limit_window_seconds: int = 3600
 
 
 settings = Settings()  # pyright: ignore[reportCallIssue] -- fields load from the environment
