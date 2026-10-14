@@ -1,12 +1,26 @@
-"""Runs the Slice E text-to-SQL benchmark: for each EvalCase, a PydanticAI
-agent connects to this server as a real MCP client, explores the schema,
-and answers the question. Correctness is execution accuracy -- the
-agent's query result compared to the expected_sql's result by value (see
-app/benchmark/grading.py for exactly what that does and doesn't cover),
-not a text match against expected_sql.
+"""Runs the Slice E text-to-SQL benchmark.
 
-Needs ANTHROPIC_API_KEY (or whatever BENCHMARK_MODEL's provider expects)
-set in the environment -- your own key, your own cost. See .env.example.
+What this script does, in plain terms: it loads a list of hand-written
+questions (EvalCase rows, e.g. "How many customers are there?"), and for
+each one, it lets an AI agent try to answer it by actually using this
+project's own MCP server -- the same way a real AI client would. The
+agent explores the database schema, writes a SQL query, and runs it
+through our safety-checked run_query tool. We then compare what the
+agent's query actually returned against the known-correct answer
+(computed by running expected_sql ourselves) and record pass/fail.
+
+"Correctness" means execution accuracy: we compare the VALUES the query
+returned, not the SQL text. Many different SQL queries can correctly
+answer the same question (different column aliases, different ORDER BY),
+so comparing text would unfairly fail correct answers. See
+app/benchmark/grading.py for exactly what this comparison does and
+doesn't catch.
+
+To actually run this for real (not just import it), you need an AI
+provider API key set in the environment. See the BENCHMARK_* variables in
+.env.example for the two supported ways to configure that -- calling
+Anthropic directly, or going through an OpenAI-compatible gateway like
+Sumopod. Either way, it's your own key and your own cost to run this.
 """
 
 import argparse
@@ -29,6 +43,10 @@ from app.db import SessionLocal
 from app.mcp.server import mcp
 from app.query.service import get_data_source
 
+# The plain-English instructions given to the AI agent before it starts
+# answering questions. This is the only "prompt engineering" in this
+# script -- everything else is enforced by code (the MCP server's own
+# safety checks), not by politely asking the model to behave.
 AGENT_INSTRUCTIONS = (
     "You answer questions about a database by using the available tools: "
     "list_tables, describe_table, sample_rows, and run_query. Always "
@@ -37,12 +55,57 @@ AGENT_INSTRUCTIONS = (
 )
 
 
+def _build_model() -> Any:
+    """Picks which AI provider to talk to, based on environment variables
+    (see .env.example). There are two supported setups:
+
+    1. Call Anthropic directly. Set BENCHMARK_MODEL to something like
+       "anthropic:claude-sonnet-4-5" and ANTHROPIC_API_KEY to your key.
+       PydanticAI reads ANTHROPIC_API_KEY automatically -- we don't even
+       touch it in this file.
+
+    2. Go through an OpenAI-compatible gateway (e.g. Sumopod, OpenRouter,
+       or similar services that let you access several AI providers
+       through one API key and one URL). Set BENCHMARK_BASE_URL to that
+       gateway's API address, BENCHMARK_API_KEY to the gateway's key, and
+       BENCHMARK_MODEL to whatever model name *that gateway* expects
+       (this is gateway-specific -- check their docs/dashboard for the
+       exact string, e.g. it might be "gpt-4o" or something else
+       entirely; it is NOT the same kind of string as option 1 above).
+
+    If BENCHMARK_BASE_URL is set, we assume setup 2. Otherwise we assume
+    setup 1."""
+    base_url = os.environ.get("BENCHMARK_BASE_URL")
+    model_name = os.environ.get("BENCHMARK_MODEL", "anthropic:claude-sonnet-4-5")
+
+    if not base_url:
+        # Setup 1: hand the plain model string straight to PydanticAI and
+        # let it figure out which provider ("anthropic") to use.
+        return model_name
+
+    # Setup 2: build a model that talks to a custom URL instead of
+    # Anthropic's own servers, using the gateway's own API key.
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    api_key = os.environ.get("BENCHMARK_API_KEY")
+    if not api_key:
+        raise SystemExit("BENCHMARK_BASE_URL is set but BENCHMARK_API_KEY is not.")
+    provider = OpenAIProvider(base_url=base_url, api_key=api_key)
+    return OpenAIChatModel(model_name, provider=provider)
+
+
 def _make_api_key_injector(api_key: str) -> Any:
-    """The model never needs to see or handle the real API key -- it's
-    injected into every tool call here, overriding whatever (if anything)
-    the model supplied. Confirmed necessary, not just tidier: a real model
-    could mistype or omit it; this makes that impossible rather than
-    hoping the model gets it right."""
+    """This is a safety detail, not just tidiness. Every call to our MCP
+    tools (list_tables, run_query, etc.) needs a workspace API key -- but
+    we never want the AI model itself to see, remember, or have to
+    correctly copy that key around. So instead of putting the key in the
+    model's instructions and hoping it pastes it into every tool call
+    correctly, this function silently stamps the real key onto every
+    tool call before it leaves this script, overriding anything the
+    model may have guessed. Tested and confirmed necessary: a test run
+    without this showed every tool call failing with an auth error,
+    because the model (reasonably) didn't know the key at all."""
 
     async def inject(
         _ctx: RunContext[Any], call_tool: CallToolFunc, name: str, args: dict[str, Any]
@@ -53,6 +116,9 @@ def _make_api_key_injector(api_key: str) -> Any:
 
 
 async def _ground_truth(connection_url: str, sql: str) -> list[dict[str, Any]]:
+    """Runs the hand-written "known correct" SQL for one question
+    directly against the database, bypassing the AI agent entirely. This
+    is the answer key we grade the agent's own query against."""
     engine = create_async_engine(connection_url)
     try:
         async with engine.connect() as conn:
@@ -65,15 +131,23 @@ async def _ground_truth(connection_url: str, sql: str) -> list[dict[str, Any]]:
 def _extract_last_run_query_call(
     messages: list[ModelMessage],
 ) -> tuple[str | None, list[dict[str, Any]] | None]:
-    """Pulls the SQL actually sent and the structured result out of the
-    last run_query tool call in the agent's message history, rather than
-    trusting the agent's own prose summary of what it found."""
+    """After the agent finishes, PydanticAI gives us its full "message
+    history" -- everything it said and every tool it called, in order.
+    This function digs through that history to find the SQL the agent
+    actually sent to run_query, and the rows that query returned. We
+    pull this from the raw tool-call data rather than trusting the
+    agent's own written summary of what it found, since that summary
+    could be wrong even if the query itself was right (or vice versa)."""
+    # First pass: remember the arguments (including the "sql" text) of
+    # every run_query call, keyed by that call's unique ID.
     call_args_by_id: dict[str, dict[str, Any]] = {}
     for message in messages:
         for part in getattr(message, "parts", []):
             if isinstance(part, ToolCallPart) and part.tool_name == "run_query":
                 call_args_by_id[part.tool_call_id] = part.args_as_dict()
 
+    # Second pass: walk backwards to find the most recent run_query call
+    # that actually succeeded, and look up its matching SQL from above.
     for message in reversed(messages):
         for part in getattr(message, "parts", []):
             if isinstance(part, ToolReturnPart) and part.tool_name == "run_query":
@@ -88,10 +162,14 @@ def _extract_last_run_query_call(
                         return (sql if isinstance(sql, str) else None), cast(
                             list[dict[str, Any]], content["rows"]
                         )
+    # The agent never made a successful run_query call at all.
     return None, None
 
 
 async def run(api_key: str) -> None:
+    # Step 1: figure out which workspace this API key belongs to, and
+    # which real database it's allowed to query -- same lookup the MCP
+    # server itself does on every request.
     async with SessionLocal() as session:
         workspace = await authenticate(session, api_key)
         data_source = await get_data_source(session, workspace)
@@ -101,10 +179,16 @@ async def run(api_key: str) -> None:
     if not eval_cases:
         raise SystemExit("No eval cases found -- run scripts/seed_eval_cases.py first.")
 
-    model = os.environ.get("BENCHMARK_MODEL", "anthropic:claude-sonnet-4-5")
+    # Step 2: set up the AI agent. toolset connects it to our own MCP
+    # server (so it uses the exact same safety-checked tools a real AI
+    # client would); process_tool_call is the API-key injection from
+    # above.
+    model = _build_model()
     toolset = MCPToolset(Client(mcp), process_tool_call=_make_api_key_injector(api_key))
     agent = Agent(model, instructions=AGENT_INSTRUCTIONS, toolsets=[toolset])
 
+    # Step 3: ask the agent every question, one at a time, and grade
+    # each answer against the known-correct result.
     correct_count = 0
     async with SessionLocal() as session:
         for case in eval_cases:
@@ -118,6 +202,9 @@ async def run(api_key: str) -> None:
             correct = actual_rows is not None and rows_equal(actual_rows, expected_rows)
             correct_count += int(correct)
 
+            # Record this attempt permanently, same as every real query
+            # this server ever runs gets audited -- the benchmark's own
+            # results are tracked the same honest way.
             session.add(
                 BenchmarkResult(
                     eval_case_id=case.id,
