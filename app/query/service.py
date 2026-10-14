@@ -43,7 +43,6 @@ class QueryExecutionError(Exception):
     QueryRejected, in validation.py) -- things like "this workspace
     isn't even set up to query anything yet.\""""
 
-    pass
 
 
 def _asyncpg_cause(exc: BaseException) -> BaseException | None:
