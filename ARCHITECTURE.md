@@ -128,21 +128,22 @@ Each test file matches the thing it's testing — `test_validation.py`
 tests `app/query/validation.py`, `test_rate_limit_and_revocation.py`
 tests the auth pieces, and so on. `test_mcp_protocol.py` is special — it
 tests the *whole chain* together through the actual MCP protocol, not
-just one file at a time.
+just one file at a time. `test_red_team.py` is the adversarial suite —
+see RED_TEAM.md for what it covers and why.
 
 ## The non-code files
 
 `phase-1` through `phase-7` are the planning trail (problem →
 requirements → domain model → ... → work plan). `THREAT_MODEL.md` says
-what this defends against and what it doesn't. `JOURNEY.md` is the
-day-by-day log of what broke and what was learned fixing it. `README.md`
-is the front door to all of that.
+what this defends against and what it doesn't. `RED_TEAM.md` is the
+published evidence for that -- the adversarial test suite's results.
+`JOURNEY.md` is the day-by-day log of what broke and what was learned
+fixing it. `README.md` is the front door to all of that.
 
 ## Open gaps, as of this writing
 
 - The web console (`app/console/`) is scaffolding only — no real key
   management action, no real audit-trail listing yet.
-- No red-team test suite yet (Slice F in `phase-7-slices-plan.md`).
 - `APP_COST_THRESHOLD` is still a guessed placeholder, never calibrated
   against real data.
 - The Slice E benchmark is built and verified end to end except for an

@@ -24,7 +24,9 @@ alongside this README:
 - [phase-7-slices-plan.md](phase-7-slices-plan.md)
 
 What this server defends against, how, and what it doesn't is in
-[THREAT_MODEL.md](THREAT_MODEL.md).
+[THREAT_MODEL.md](THREAT_MODEL.md). The adversarial test suite proving
+those defenses, with published pass/fail results, is
+[RED_TEAM.md](RED_TEAM.md).
 
 The day-by-day build log — what broke, what surprised me, why decisions
 landed where they did — is in [JOURNEY.md](JOURNEY.md).
@@ -51,7 +53,13 @@ free `TestModel` stub. Running it for real needs an `ANTHROPIC_API_KEY`
 in `.env` -- Arthur's own key, his own cost, not something to spend
 without asking.
 
-Remaining: Slice F (red-team suite, shrink-not-cut if time is short).
+**Slice F (red-team suite) done** -- 16 adversarial tests against the
+safety layer, including genuine defense-in-depth against a real
+provisioned read-only role, not just the app-level validator. See
+[RED_TEAM.md](RED_TEAM.md) for the full catalog and results.
+
+Remaining: Slice G (the web console is still scaffolding only -- see
+ARCHITECTURE.md's "Open Gaps").
 
 ## Layout
 

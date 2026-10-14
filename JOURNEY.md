@@ -285,3 +285,57 @@ whether the local test can actually fail the way the real environment
 would. A local check that structurally can't reproduce the failure mode
 isn't verification, it's theater.
 
+## 2026-10-14 — Switching to Arthur's real provider, then Slice F
+
+Arthur's AI provider turned out to be Sumopod (an OpenAI-compatible
+gateway), not direct Anthropic, with the actual env var names
+(`SUMOPOD_API_KEY`, `SUMOPOD_BASE_URL`, `AI_MODEL`) chosen on his end.
+Rewired `_build_model()` to match, verified both the gateway path and
+the direct-Anthropic fallback construct correctly using fake stand-in
+values -- never touching the real secrets, per his explicit ask. Caught
+one more real gap right after: once he filled in the real `.env`,
+`os.environ.get("SUMOPOD_API_KEY")` still came back empty, because
+nothing was loading the `.env` file into the process for that script --
+`app/config.py`'s `Settings` reads `.env` for its own fields, but that
+mechanism doesn't touch `os.environ` for anything else. Fixed with an
+explicit `load_dotenv()` call, verified by checking only *presence*,
+never the actual values.
+
+Also found and fixed a self-inflicted CI failure the same way as the
+venv bug before it: a fix made on disk, verified locally, but never
+actually staged into the commit that was supposed to contain it. Caught
+by reproducing the exact failing commit with `git archive` rather than
+trusting "it passed on my machine a few commits ago."
+
+Then built Slice F, the red-team suite. The interesting design decision
+wasn't the attack catalog itself -- it was recognizing that most of the
+existing safety tests only prove the *validator* catches something, not
+that the *database* would catch it independently if the validator had a
+bug. Added a second fixture (`readonly_role_workspace`) that provisions
+a REAL restricted role via `scripts/provision_readonly_role.py`'s own
+`provision()` function (not a reimplementation of its SQL), so a subset
+of the red-team tests bypass the validator entirely and hit the
+database directly -- proving defense-in-depth instead of assuming it.
+
+That fixture surfaced two more real bugs on its own: the same
+password-masking issue from Slice A (`str(engine.url)` hides the
+password; needed `render_as_string(hide_password=False)` again), and a
+teardown failure -- `DROP ROLE` refuses to run while the role still
+holds any granted privileges, which it always will right after
+`provision()` runs. Fixed with `DROP OWNED BY` before the drop.
+
+The red-team suite itself caught one dishonest test before it shipped:
+a "comment-based injection" case where the `/* ... */` actually just
+swallowed the rest of the string as a real SQL comment, leaving a
+genuinely harmless query. The test's *expectation* was wrong, not the
+code -- worth catching, since shipping a red-team test that asserts the
+wrong thing would be worse than not having it, it would look like
+coverage that isn't real.
+
+The most honest result in the whole suite is probably
+`test_security_definer_function_succeeds_if_validator_is_bypassed` --
+a test that's *supposed* to pass by demonstrating an attack succeeding,
+specifically to prove the documented residual risk in THREAT_MODEL.md
+is real and not just a hedge. A red-team suite that only ever shows
+green checkmarks for things blocked isn't telling the whole story.
+
