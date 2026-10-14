@@ -6,8 +6,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
+# These three classes describe the database tables involved in actually
+# running a query, as opposed to app/auth/models.py which handles who's
+# allowed to ask.
+
 
 class DataSourceConnection(Base):
+    """Which real, outside database a workspace is allowed to query.
+    connection_url is the full connection string (e.g. which host, which
+    database, which login) -- set only by the operator via the command
+    line (scripts/seed_workspace.py), never by anything a client can
+    reach, which closes off a whole category of attack (pointing the
+    server at somewhere it shouldn't connect to)."""
+
     __tablename__ = "data_source_connections"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -16,8 +27,12 @@ class DataSourceConnection(Base):
 
 
 class QueryExecution(Base):
-    """A single query attempt. This record is the audit log entry — see
-    Phase 3: QueryExecution and AuditEntry were merged, they are always 1:1."""
+    """One attempt to run a query -- and this record *is* the audit
+    log entry for it. There's no separate "audit log" table elsewhere;
+    every single attempt (whether it succeeded, got rejected by the
+    safety checks, or errored out) gets exactly one row here, which is
+    what lets you look back and see everything this server has ever
+    been asked to do."""
 
     __tablename__ = "query_executions"
 
@@ -27,14 +42,21 @@ class QueryExecution(Base):
         ForeignKey("data_source_connections.id")
     )
     query_text: Mapped[str]
-    status: Mapped[str]
+    status: Mapped[str]  # "succeeded", "rejected", "errored", or "timed_out"
     cost_estimate: Mapped[float | None]
     rejection_reason: Mapped[str | None]
     created_at: Mapped[datetime]
 
 
 class SchemaCache(Base):
-    """Advisory only. Never consulted during query execution — see Phase 3/4."""
+    """A saved copy of "what tables/columns exist?" for a workspace, so
+    we don't have to re-ask the real database every single time someone
+    wants to browse the schema. Important: this is a convenience copy
+    only -- it's never used to decide whether an actual query is safe or
+    what it returns. If this cache goes stale, the worst that happens is
+    describe_table shows outdated info for a few minutes; it can never
+    cause a real query to return wrong data, since real queries always
+    go straight to the live database."""
 
     __tablename__ = "schema_caches"
 
