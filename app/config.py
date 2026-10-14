@@ -2,6 +2,9 @@
 local .env file) into one typed object that the rest of the app imports
 and uses -- see .env.example for what every value actually means."""
 
+import secrets
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +25,21 @@ class Settings(BaseSettings):
     cost_threshold: int = 100_000  # reject a query estimated pricier than this
     demo_rate_limit: int = 5  # max requests per workspace per window
     demo_rate_limit_window_seconds: int = 3600  # how long that window is
+    # Signs the web console's login session cookie. If left unset, a
+    # random one is generated at startup -- fine for local use, but it
+    # means everyone gets logged out whenever the server restarts.
+    # Set this explicitly for anything longer-lived.
+    console_session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+
+    @field_validator("console_session_secret", mode="after")
+    @classmethod
+    def _fall_back_to_random_secret_if_blank(cls, value: str) -> str:
+        # Without this, APP_CONSOLE_SESSION_SECRET= (present in .env but
+        # left empty, e.g. straight from .env.example) would set this to
+        # an actual empty string instead of falling through to the
+        # random default -- confirmed by testing, not assumed. An empty
+        # signing key defeats the whole point of signing the cookie.
+        return value if value else secrets.token_urlsafe(32)
 
 
 # Built once, at import time, from whatever's in the environment/.env

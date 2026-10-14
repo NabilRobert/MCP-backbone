@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.5",
     "jinja2>=3.1",
     "mcp>=1.0",
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,12 @@ benchmark = [
 [tool.ruff]
 line-length = 100
 extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Form()/Query() in a default argument is the
+# framework's own idiomatic pattern, not the mutable-default-argument
+# mistake B008 normally catches.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
