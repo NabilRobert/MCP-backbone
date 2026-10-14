@@ -6,18 +6,18 @@ of viewing its audit history (Phase 3)."""
 
 import argparse
 import asyncio
-import datetime
 
 from sqlalchemy import select
 
-from app.auth.models import ApiKey, Workspace
+from app.auth.models import Workspace
+from app.auth.service import get_active_api_key, revoke_api_key
 from app.db import SessionLocal
 
 
 async def revoke(workspace_name: str) -> None:
-    """Finds the given workspace's currently-active key and flips it to
-    "revoked" -- from that moment on, authenticate() in
-    app/auth/service.py will refuse it immediately."""
+    """Finds the given workspace and revokes its currently-active key,
+    via the same revoke_api_key() the web console's key-management page
+    uses -- one shared implementation, not two that could drift apart."""
     async with SessionLocal() as session:
         workspace = (
             await session.execute(select(Workspace).where(Workspace.name == workspace_name))
@@ -25,17 +25,10 @@ async def revoke(workspace_name: str) -> None:
         if workspace is None:
             raise SystemExit(f"no workspace named '{workspace_name}'")
 
-        api_key = (
-            await session.execute(
-                select(ApiKey).where(ApiKey.workspace_id == workspace.id, ApiKey.status == "active")
-            )
-        ).scalar_one_or_none()
-        if api_key is None:
+        if await get_active_api_key(session, workspace) is None:
             raise SystemExit(f"workspace '{workspace_name}' has no active API key")
 
-        api_key.status = "revoked"
-        api_key.revoked_at = datetime.datetime.now(datetime.UTC)
-        await session.commit()
+        await revoke_api_key(session, workspace)
 
 
 def main() -> None:
