@@ -58,6 +58,9 @@ CASES: list[dict[str, str]] = [
 
 
 async def seed() -> None:
+    """Wipes any previously saved questions and writes the current list
+    above in their place -- so editing CASES and re-running this always
+    leaves the database matching exactly what's in this file."""
     async with SessionLocal() as session:
         await session.execute(delete(EvalCase))
         for case in CASES:

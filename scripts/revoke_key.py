@@ -15,6 +15,9 @@ from app.db import SessionLocal
 
 
 async def revoke(workspace_name: str) -> None:
+    """Finds the given workspace's currently-active key and flips it to
+    "revoked" -- from that moment on, authenticate() in
+    app/auth/service.py will refuse it immediately."""
     async with SessionLocal() as session:
         workspace = (
             await session.execute(select(Workspace).where(Workspace.name == workspace_name))

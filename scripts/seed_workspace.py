@@ -14,10 +14,15 @@ from app.query.models import DataSourceConnection
 
 
 async def seed(name: str, connection_url: str, console_username: str, console_password: str) -> str:
+    """Creates everything a brand-new workspace needs in one go: the
+    workspace itself, which real database it's allowed to query, a
+    dashboard login, and its first API key. Returns the API key in
+    plain text -- the ONLY time it ever exists in plain text, since
+    only its hash gets stored (see app/auth/security.py)."""
     async with SessionLocal() as session:
         workspace = Workspace(name=name, created_at=datetime.datetime.now(datetime.UTC))
         session.add(workspace)
-        await session.flush()
+        await session.flush()  # assigns workspace.id before it's used below
 
         session.add(
             DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url)
@@ -51,6 +56,9 @@ def main() -> None:
     parser.add_argument("--console-username", required=True)
     args = parser.parse_args()
 
+    # getpass hides what you type, like a normal password prompt --
+    # safer than putting the password directly on the command line,
+    # where it could end up saved in your shell's history.
     console_password = getpass.getpass("Console password: ")
 
     api_key = asyncio.run(

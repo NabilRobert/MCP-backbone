@@ -26,18 +26,37 @@ import asyncpg
 
 
 async def provision(admin_dsn: str, role_name: str, database: str, schema: str) -> str:
+    """Connects to the target database as a superuser/admin (admin_dsn)
+    and creates a brand-new, deliberately limited database login
+    (role_name) that this server's AI-facing queries will actually use.
+    Each line below grants or removes one specific permission -- plain
+    English for each is in the comments."""
     password = secrets.token_urlsafe(24)
     conn = await asyncpg.connect(admin_dsn)
     try:
+        # Start clean, in case a role with this name already exists.
         await conn.execute(f'drop role if exists "{role_name}"')
+        # Create the login itself, with a freshly generated password.
         await conn.execute(f"create role \"{role_name}\" login password '{password}'")
+        # Allow it to connect to the database at all...
         await conn.execute(f'grant connect on database "{database}" to "{role_name}"')
+        # ...and to "see into" this particular schema (a schema is a
+        # named group of tables, like a folder of tables)...
         await conn.execute(f'grant usage on schema "{schema}" to "{role_name}"')
+        # ...and to read (but not write) every table that exists in it
+        # right now.
         await conn.execute(f'grant select on all tables in schema "{schema}" to "{role_name}"')
+        # Extend that same read permission to tables created LATER, as
+        # long as they're created by this same admin connection (see
+        # the module docstring above for exactly what this does and
+        # doesn't cover).
         await conn.execute(
             f'alter default privileges in schema "{schema}" '
             f'grant select on tables to "{role_name}"'
         )
+        # Block this role from calling any custom function in the
+        # schema -- defense-in-depth against the SECURITY DEFINER
+        # bypass described in the module docstring.
         await conn.execute(f'revoke execute on all functions in schema "{schema}" from public')
         await conn.execute(
             f'alter default privileges in schema "{schema}" revoke execute on functions from public'

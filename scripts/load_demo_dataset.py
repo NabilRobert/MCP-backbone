@@ -60,6 +60,10 @@ STATUSES = ["placed", "shipped", "delivered", "cancelled"]
 def _generate_rows(
     num_customers: int, num_products: int, num_orders: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Makes up fake-but-plausible rows for all four tables, with orders
+    randomly referencing real customers/products and order_items
+    randomly referencing real orders -- so the data actually has the
+    kind of relationships a real storefront's data would have."""
     random.seed(42)  # deterministic -- same dataset every run
 
     customers: list[dict[str, Any]] = [
@@ -105,11 +109,16 @@ def _generate_rows(
 
 
 async def load(connection_url: str, num_customers: int, num_products: int, num_orders: int) -> None:
+    """Connects to the target database, (re)creates the four tables
+    from scratch, and fills them with the generated fake data."""
     customers, products, orders, order_items = _generate_rows(num_customers, num_products, num_orders)
 
     engine = create_async_engine(connection_url)
     try:
         async with engine.begin() as conn:
+            # SCHEMA_SQL is several statements in one string -- split on
+            # ";" and run each one separately, since the database
+            # driver only runs one statement at a time.
             for statement in SCHEMA_SQL.strip().split(";"):
                 if statement.strip():
                     await conn.execute(text(statement))
