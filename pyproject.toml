@@ -26,6 +26,7 @@ dev = [
 ]
 benchmark = [
     "pydantic-ai-slim[mcp,anthropic,openai]>=2.55",
+    "python-dotenv>=1.0",
 ]
 
 [tool.ruff]

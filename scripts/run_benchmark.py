@@ -31,12 +31,21 @@ import os
 import time
 from typing import Any, cast
 
+from dotenv import load_dotenv
 from fastmcp import Client
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.mcp import CallToolFunc, MCPToolset
 from pydantic_ai.messages import ModelMessage, ToolCallPart, ToolReturnPart
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+# app/config.py's Settings reads .env for the app's own APP_* variables,
+# but that doesn't put anything into the process environment for OTHER
+# code to see -- so without this, os.environ.get("SUMOPOD_API_KEY")
+# below would never find a value even if it's sitting right there in
+# .env. This line is what actually makes that file's values visible to
+# this script.
+load_dotenv()
 
 from app.auth.service import authenticate
 from app.benchmark.grading import rows_equal
