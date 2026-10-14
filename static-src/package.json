@@ -1,5 +1,5 @@
 {
-  "name": "jarvis-mcp-console",
+  "name": "database-mcp-console",
   "private": true,
   "scripts": {
     "build": "esbuild main.ts --bundle --outfile=../app/console/static/main.js",

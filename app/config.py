@@ -1,23 +1,29 @@
+"""Reads this server's own settings from environment variables (or a
+local .env file) into one typed object that the rest of the app imports
+and uses -- see .env.example for what every value actually means."""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """The server's own configuration, read from environment variables
     (or a local .env file) that start with APP_. The .env file also
-    holds unrelated variables for scripts/run_benchmark.py
-    (BENCHMARK_MODEL, ANTHROPIC_API_KEY, etc.) -- extra="ignore" tells
-    this class to skip over anything it doesn't recognize instead of
-    erroring, since this file is shared by more than one script."""
+    holds unrelated variables used only by scripts/run_benchmark.py
+    (SUMOPOD_API_KEY, AI_MODEL, etc.) -- extra="ignore" tells this class
+    to skip over anything it doesn't recognize instead of erroring,
+    since this one file is shared by more than one script."""
 
     model_config = SettingsConfigDict(env_prefix="APP_", env_file=".env", extra="ignore")
 
-    database_url: str
-    target_database_url: str
-    query_timeout_seconds: int = 5
-    explain_timeout_seconds: int = 2
-    cost_threshold: int = 100_000
-    demo_rate_limit: int = 5
-    demo_rate_limit_window_seconds: int = 3600
+    database_url: str  # this project's own bookkeeping database
+    target_database_url: str  # the outside database AI clients can query
+    query_timeout_seconds: int = 5  # kill a real query after this long
+    explain_timeout_seconds: int = 2  # kill the cost-estimate step after this long
+    cost_threshold: int = 100_000  # reject a query estimated pricier than this
+    demo_rate_limit: int = 5  # max requests per workspace per window
+    demo_rate_limit_window_seconds: int = 3600  # how long that window is
 
 
+# Built once, at import time, from whatever's in the environment/.env
+# file -- every other file just does "from app.config import settings".
 settings = Settings()  # pyright: ignore[reportCallIssue] -- fields load from the environment

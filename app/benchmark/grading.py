@@ -1,3 +1,7 @@
+"""Decides whether the AI agent's answer to a benchmark question was
+actually correct -- by comparing what its query returned against the
+known-correct answer, not by comparing the SQL text itself."""
+
 from typing import Any
 
 

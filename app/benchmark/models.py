@@ -5,8 +5,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
+# Only used by the Slice E text-to-SQL benchmark (scripts/run_benchmark.py)
+# -- the live server never reads or writes these tables.
+
 
 class EvalCase(Base):
+    """One hand-written benchmark question, with its known-correct
+    answer attached. question is something like "How many customers are
+    there?"; expected_sql is the SQL that correctly answers it, written
+    by hand and trusted as the "answer key.\""""
+
     __tablename__ = "eval_cases"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -15,6 +23,10 @@ class EvalCase(Base):
 
 
 class BenchmarkResult(Base):
+    """One recorded outcome from actually running the benchmark: which
+    question (eval_case_id) was asked, what SQL the AI agent actually
+    came up with (actual_sql), and whether that turned out correct."""
+
     __tablename__ = "benchmark_results"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
