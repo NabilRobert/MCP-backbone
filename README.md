@@ -58,8 +58,16 @@ safety layer, including genuine defense-in-depth against a real
 provisioned read-only role, not just the app-level validator. See
 [RED_TEAM.md](RED_TEAM.md) for the full catalog and results.
 
-Remaining: Slice G (the web console is still scaffolding only -- see
-ARCHITECTURE.md's "Open Gaps").
+**Slice G (web console) done** -- login (a separate credential from the
+API key, so revoking a compromised key never locks you out of the
+audit history), a dashboard polling the real audit log every 5s, and a
+keys page that can rotate or revoke the workspace's key. Verified
+through FastAPI's `TestClient` hitting the actual HTTP layer (login,
+redirects, sessions, forms, the real-data audit API) -- see JOURNEY.md
+for a real environment limit hit trying to also verify it visually in
+a browser, and why the TestClient coverage made that non-blocking.
+
+All seven slices from `phase-7-slices-plan.md` are now built.
 
 ## Layout
 

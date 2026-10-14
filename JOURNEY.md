@@ -339,3 +339,51 @@ specifically to prove the documented residual risk in THREAT_MODEL.md
 is real and not just a hedge. A red-team suite that only ever shows
 green checkmarks for things blocked isn't telling the whole story.
 
+## 2026-10-14 (continued) — Slice G, the console for real
+
+Went from an empty scaffold (two routes rendering blank pages) to an
+actually working console: login against ConsoleCredential (separate
+from the API key on purpose, so revoking a compromised key never locks
+anyone out of the audit history), a dashboard polling the real audit
+log, and a keys page that can rotate or revoke the workspace's key.
+
+Centralized key issuance/revocation into app/auth/service.py first --
+scripts/revoke_key.py already had working revoke logic, and the
+console needed the exact same thing plus a new "rotate" operation.
+Duplicating that between a CLI script and a web route would have been
+exactly the kind of drift this project has been careful to avoid
+elsewhere, so both now call the same functions.
+
+Caught a real timing side-channel while writing the login check: the
+first version returned early for an unknown username without ever
+running the password hash, meaning a login attempt could be used to
+discover which usernames exist just by how fast the response came
+back. Fixed by always running the slow hash, even against a dummy
+value, so the timing is the same either way -- worth catching before
+it shipped, not after.
+
+Caught a second real bug immediately on first import: the audit API's
+return type (`list[dict] | RedirectResponse`) isn't something FastAPI
+can turn into a Pydantic response model, which crashed the app at
+startup. Neither ruff nor pyright catches this kind of thing --  only
+actually running the app does.
+
+A third, smaller bug: an env var present in `.env` but left blank
+(exactly what `.env.example` ships) silently overrode the random
+session-secret default with an actual empty string, which would have
+meant an unsigned, forgeable login cookie. Found by testing the exact
+case Arthur would actually hit, not just the happy path.
+
+Tried to verify all of this visually in the browser preview and hit a
+real environment limit instead: the preview tool resolves `launch.json`
+relative to a parent directory one level up from this repo (which
+contains a space in its name, "MCP project"), and spawning a process
+rooted there was denied by the sandbox -- `getcwd(): Operation not
+permitted` -- regardless of how the command was quoted. Didn't fight it
+further once the actual functional behavior was already verified more
+rigorously a different way: every route, redirect, form, and the
+real-data audit API were all tested through FastAPI's `TestClient`,
+in-process, hitting the actual HTTP layer rather than just the
+underlying functions. A screenshot would have been nice to have, not
+proof of anything the tests didn't already cover.
+

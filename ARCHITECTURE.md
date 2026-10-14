@@ -96,11 +96,15 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   limit, which databases to use) from environment variables into one
   typed object the rest of the code uses.
 - **`app/main.py`** — wires the web console's routes into an actual
-  running web server (FastAPI). Small, since the console itself is still
-  mostly unbuilt (see Open Gaps below).
-- **`app/console/routes.py`** — the web dashboard's pages. Currently
-  still an empty shell — it renders a page, but nothing real is wired up
-  yet (no actual key list, no actual audit table).
+  running web server (FastAPI), plus the session-cookie middleware the
+  console's login depends on.
+- **`app/console/auth.py`** — the console's login check, against
+  `ConsoleCredential` (deliberately separate from `ApiKey` -- see
+  app/auth/models.py -- so revoking a compromised API key never locks
+  the operator out of viewing that workspace's own audit history).
+- **`app/console/routes.py`** — the web dashboard's pages: login,
+  logout, a dashboard showing the real audit trail, and a keys page
+  that can rotate or revoke the workspace's API key.
 - **`migrations/`** — Alembic's job: turning the Python model
   definitions above into actual `CREATE TABLE` statements run against
   Postgres, and tracking that history so the database schema can be
@@ -142,9 +146,10 @@ fixing it. `README.md` is the front door to all of that.
 
 ## Open gaps, as of this writing
 
-- The web console (`app/console/`) is scaffolding only — no real key
-  management action, no real audit-trail listing yet.
 - `APP_COST_THRESHOLD` is still a guessed placeholder, never calibrated
   against real data.
 - The Slice E benchmark is built and verified end to end except for an
   actual AI model call, which needs a real API key in `.env`.
+- The console's pages are verified via FastAPI's `TestClient` (the real
+  HTTP layer), but never visually confirmed in an actual browser — a
+  preview-sandbox limitation hit while building it, see JOURNEY.md.
