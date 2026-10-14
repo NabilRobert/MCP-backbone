@@ -66,6 +66,20 @@ async def provision(admin_dsn: str, role_name: str, database: str, schema: str) 
     return password
 
 
+async def drop_role(admin_dsn: str, role_name: str) -> None:
+    """Removes a role created by provision() above -- used by tests to
+    clean up the throwaway roles they create. DROP ROLE on its own
+    fails if the role still holds any granted privileges (which it
+    will, since provision() grants several) -- DROP OWNED BY strips
+    those first."""
+    conn = await asyncpg.connect(admin_dsn)
+    try:
+        await conn.execute(f'drop owned by "{role_name}"')
+        await conn.execute(f'drop role if exists "{role_name}"')
+    finally:
+        await conn.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--admin-dsn", required=True, help="Superuser connection string")
