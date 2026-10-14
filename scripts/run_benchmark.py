@@ -17,10 +17,12 @@ app/benchmark/grading.py for exactly what this comparison does and
 doesn't catch.
 
 To actually run this for real (not just import it), you need an AI
-provider API key set in the environment. See the BENCHMARK_* variables in
-.env.example for the two supported ways to configure that -- calling
-Anthropic directly, or going through an OpenAI-compatible gateway like
-Sumopod. Either way, it's your own key and your own cost to run this.
+provider set up in the environment. The main setup this project uses is
+Sumopod, an OpenAI-compatible AI gateway (one key, one shared address,
+access to several underlying models) -- see the SUMOPOD_* and AI_MODEL
+variables in .env.example. A direct-Anthropic fallback also exists if
+SUMOPOD_API_KEY isn't set. Either way, it's your own key and your own
+cost to run this.
 """
 
 import argparse
@@ -59,39 +61,38 @@ def _build_model() -> Any:
     """Picks which AI provider to talk to, based on environment variables
     (see .env.example). There are two supported setups:
 
-    1. Call Anthropic directly. Set BENCHMARK_MODEL to something like
-       "anthropic:claude-sonnet-4-5" and ANTHROPIC_API_KEY to your key.
-       PydanticAI reads ANTHROPIC_API_KEY automatically -- we don't even
-       touch it in this file.
+    1. (The main one this project uses.) Go through Sumopod, an
+       OpenAI-compatible AI gateway -- one account/key gives access to
+       several different underlying models, instead of signing up with
+       each provider separately. Set SUMOPOD_API_KEY to your Sumopod
+       key, SUMOPOD_BASE_URL to Sumopod's API address, and AI_MODEL to
+       whichever model Sumopod should use (e.g. "gpt-5-mini").
 
-    2. Go through an OpenAI-compatible gateway (e.g. Sumopod, OpenRouter,
-       or similar services that let you access several AI providers
-       through one API key and one URL). Set BENCHMARK_BASE_URL to that
-       gateway's API address, BENCHMARK_API_KEY to the gateway's key, and
-       BENCHMARK_MODEL to whatever model name *that gateway* expects
-       (this is gateway-specific -- check their docs/dashboard for the
-       exact string, e.g. it might be "gpt-4o" or something else
-       entirely; it is NOT the same kind of string as option 1 above).
+    2. (Fallback.) Call Anthropic directly instead -- used only if
+       SUMOPOD_API_KEY isn't set. Set AI_MODEL to something like
+       "anthropic:claude-sonnet-4-5" and ANTHROPIC_API_KEY to a normal
+       Anthropic key. PydanticAI reads ANTHROPIC_API_KEY automatically --
+       we don't even touch it in this file."""
+    sumopod_key = os.environ.get("SUMOPOD_API_KEY")
+    model_name = os.environ.get("AI_MODEL", "anthropic:claude-sonnet-4-5")
 
-    If BENCHMARK_BASE_URL is set, we assume setup 2. Otherwise we assume
-    setup 1."""
-    base_url = os.environ.get("BENCHMARK_BASE_URL")
-    model_name = os.environ.get("BENCHMARK_MODEL", "anthropic:claude-sonnet-4-5")
-
-    if not base_url:
-        # Setup 1: hand the plain model string straight to PydanticAI and
-        # let it figure out which provider ("anthropic") to use.
+    if not sumopod_key:
+        # Fallback setup: hand the plain model string straight to
+        # PydanticAI and let it figure out which provider to use.
         return model_name
 
-    # Setup 2: build a model that talks to a custom URL instead of
-    # Anthropic's own servers, using the gateway's own API key.
+    # Main setup: build a model that talks to Sumopod's address instead
+    # of Anthropic's own servers, using the Sumopod key.
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    api_key = os.environ.get("BENCHMARK_API_KEY")
-    if not api_key:
-        raise SystemExit("BENCHMARK_BASE_URL is set but BENCHMARK_API_KEY is not.")
-    provider = OpenAIProvider(base_url=base_url, api_key=api_key)
+    base_url = os.environ.get("SUMOPOD_BASE_URL")
+    if not base_url:
+        raise SystemExit(
+            "SUMOPOD_API_KEY is set but SUMOPOD_BASE_URL is not -- "
+            "add Sumopod's API address to .env (check Sumopod's own docs/dashboard)."
+        )
+    provider = OpenAIProvider(base_url=base_url, api_key=sumopod_key)
     return OpenAIChatModel(model_name, provider=provider)
 
 
