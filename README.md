@@ -5,6 +5,10 @@ a database's schema and run safe, read-only SQL queries against it — with
 every attempt validated, cost-checked, and logged. Built to be small enough
 to read end to end, not as a piece of a larger platform.
 
+A guided tour of the codebase -- what each file does and why, following
+how a real request actually flows through it -- is in
+[ARCHITECTURE.md](ARCHITECTURE.md). Start there if you're new to this repo.
+
 ## Planning
 
 The full phase-by-phase planning trail (problem, requirements, domain model,
