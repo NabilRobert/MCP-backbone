@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in -- Database MCP Console</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 4rem auto; max-width: 320px; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-size: 0.9rem; }
+    input { width: 100%; padding: 0.4rem; margin-top: 0.25rem; box-sizing: border-box; }
+    button { margin-top: 1.5rem; width: 100%; padding: 0.5rem; }
+    .error { color: #a33; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Console login</h1>
+  <form method="post" action="/console/login">
+    <label>
+      Username
+      <input type="text" name="username" required autofocus />
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" required />
+    </label>
+    <button type="submit">Log in</button>
+  </form>
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+</body>
+</html>

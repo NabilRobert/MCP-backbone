@@ -1,5 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>API keys</h1>
-<div id="key-panel"></div>
+<h1>API key</h1>
+
+{% if new_key %}
+  <p><strong>New key issued -- shown once, copy it now:</strong></p>
+  <p class="key-box">{{ new_key }}</p>
+{% endif %}
+
+{% if active_key %}
+  <p>Status: <strong>active</strong></p>
+  <p>Created: {{ active_key.created_at }}</p>
+  <form class="inline" method="post" action="/console/keys/revoke"
+        onsubmit="return confirm('Revoke the current API key? Any AI client using it will stop working immediately.');">
+    <button type="submit">Revoke key</button>
+  </form>
+{% else %}
+  <p>Status: <strong>no active key</strong></p>
+{% endif %}
+
+<form class="inline" method="post" action="/console/keys/rotate"
+      onsubmit="return confirm('Issue a new key? This revokes the current one immediately.');">
+  <button type="submit">{{ "Issue a new key" if active_key else "Issue a key" }}</button>
+</form>
 {% endblock %}

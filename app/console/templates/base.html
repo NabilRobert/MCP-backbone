@@ -2,13 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Database MCP Console</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+    nav a { margin-right: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
+    .status-succeeded { color: #0a7a0a; }
+    .status-rejected, .status-errored, .status-timed_out { color: #a33; }
+    .key-box { font-family: monospace; background: #f4f4f4; padding: 0.75rem; border-radius: 4px; word-break: break-all; }
+    .error { color: #a33; }
+    form.inline { display: inline; }
+    .logout-form { margin: 0; }
+  </style>
   <script type="module" src="/console/static/main.js"></script>
 </head>
 <body>
   <nav>
-    <a href="/console/">Dashboard</a>
-    <a href="/console/keys">Keys</a>
+    <div>
+      <a href="/console/">Dashboard</a>
+      <a href="/console/keys">Keys</a>
+    </div>
+    <form class="logout-form" method="post" action="/console/logout">
+      <button type="submit">Log out</button>
+    </form>
   </nav>
   {% block content %}{% endblock %}
 </body>
