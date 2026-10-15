@@ -1,6 +1,3 @@
-# pyright: basic
-# (asyncpg ships no type stubs; this file's data-loading path is a
-# handful of raw asyncpg calls, so strict mode here is mostly noise.)
 """Loads Pagila -- a real, well-known public Postgres sample database
 (a DVD rental store: actors, films, customers, rentals, payments,
 stores, 16+ tables) -- into the target database, as a richer
@@ -11,14 +8,20 @@ port of MySQL's "Sakila" sample database). Used here only as public
 sample data -- it was never real customer data, even in the original
 project, and this script makes no other claim about it.
 
-Needs `psql` on PATH (or pass --psql with a full path) to apply the
-schema file: it defines several PL/pgSQL trigger functions with
-semicolons inside their own bodies, which a naive "split on semicolons
-and run each piece" approach -- the trick load_demo_dataset.py's much
-simpler schema gets away with -- would corrupt. Only a real SQL client
-parses that correctly. The (much larger) data file is loaded directly
-through asyncpg's own COPY support instead, since it doesn't need a
-general SQL parser, just the Postgres COPY FROM stdin protocol.
+Needs `psql` on PATH (or pass --psql with a full path). The schema
+file defines several PL/pgSQL trigger functions with semicolons inside
+their own bodies, which a naive "split on semicolons and run each
+piece" approach -- the trick load_demo_dataset.py's much simpler
+schema gets away with -- would corrupt. Only a real SQL client parses
+that correctly. Schema and data are fed to ONE continuous `psql`
+session (not a separate connection per file): pg_dump's "COPY ...
+FROM stdin" data format is designed for exactly this -- psql reads the
+follow-on lines as the row data itself -- and a single session also
+sidesteps a real problem hit running this against a pooled/managed
+Postgres host: a second connection opened moments after the first one
+created the schema saw "relation does not exist", almost certainly a
+pooler routing it to a different backend that hadn't caught up yet.
+One session the whole way through can't have that problem.
 
 Three compatibility patches are applied to the upstream schema before
 it's run, each found by actually trying to load it, not anticipated in
@@ -28,17 +31,19 @@ advance -- see the comments next to each one:
   3. The optional film_embedding table and its "vector" extension are
      dropped entirely -- nothing in this project does embeddings/vector
      search, so it's not worth requiring pgvector just to load sample
-     data we'd never use."""
+     data we'd never use. Every object's "OWNER TO postgres" is also
+     dropped: whoever runs the CREATE already owns the object, so this
+     is a no-op on hosts where that happens to be "postgres" too (the
+     local test container) and an outright failure wherever it isn't --
+     reassigning ownership needs permission to SET ROLE to the target
+     role, which an ordinary (non-superuser) connection on a managed
+     host doesn't have."""
 
 import argparse
-import asyncio
-import io
 import re
 import subprocess
 import urllib.request
 from pathlib import Path
-
-import asyncpg
 
 SCHEMA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-schema.sql"
 DATA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-data.sql"
@@ -148,66 +153,57 @@ def _mentions_pgvector(statement: str) -> bool:
     return bool(_VECTOR_WORD.search(statement)) or "film_embedding" in statement.lower()
 
 
-def _run_schema_file(psql_path: str, connection_url: str, schema_file: Path) -> None:
-    schema_sql = schema_file.read_text()
+_OWNER_TO_POSTGRES = re.compile(r"\bOWNER\s+TO\s+postgres\b", re.IGNORECASE)
+
+
+def _patch_schema(schema_sql: str) -> str:
     patched_sql = schema_sql.replace("DEFAULT uuidv7()", "DEFAULT gen_random_uuid()")
     patched_sql = patched_sql.replace(") VIRTUAL", ") STORED")
 
     statements = _split_sql_statements(patched_sql)
-    kept = [s for s in statements if not _mentions_pgvector(s)]
-    final_sql = "\n".join(kept)
+    kept = [s for s in statements if not _mentions_pgvector(s) and not _OWNER_TO_POSTGRES.search(s)]
+    return "\n".join(kept)
 
+
+def _patch_data(data_sql: str) -> str:
+    """Removes the one "COPY public.film_embedding (...) FROM stdin;
+    ... \\." block from the data file -- that table was dropped from
+    the schema above, so there's nowhere for its rows to go. Every
+    other COPY block (and everything else in the file) is left
+    untouched, byte for byte, since psql consumes pg_dump's COPY
+    format natively.
+
+    Also strips the file's own "SET transaction_timeout = 0;" preamble
+    line -- it was dumped with a newer pg_dump (Postgres 17+) than the
+    Postgres 16 this project targets, and that GUC doesn't exist yet
+    there, which is a hard error, not a warning."""
+    data_sql = data_sql.replace("SET transaction_timeout = 0;\n", "")
+    lines = data_sql.splitlines(keepends=True)
+    kept_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        match = _COPY_HEADER.match(lines[i].rstrip("\n"))
+        if match and match.group(1) == "film_embedding":
+            i += 1
+            while lines[i].rstrip("\n") != "\\.":
+                i += 1
+            i += 1  # skip the "\." terminator itself
+            continue
+        kept_lines.append(lines[i])
+        i += 1
+    return "".join(kept_lines)
+
+
+def _run_psql(psql_path: str, connection_url: str, sql: str, description: str) -> None:
     result = subprocess.run(
         [psql_path, connection_url, "-v", "ON_ERROR_STOP=1"],
-        input=final_sql,
+        input=sql,
         check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        raise SystemExit(f"psql failed applying {schema_file}:\n{result.stderr}")
-
-
-def _iter_copy_blocks(data_sql: str):
-    """Walks the data file's lines looking for "COPY ... FROM stdin;"
-    headers, then collects every line after it up to the lone "\\."
-    terminator pg_dump always writes to end a block -- that collected
-    text is exactly the tab-separated data COPY expects, same format
-    whether it came from pg_dump or a hand-typed COPY session. Skips
-    the film_embedding table -- dropped from the schema above, so
-    there's nowhere for its rows to go."""
-    lines = data_sql.splitlines()
-    i = 0
-    while i < len(lines):
-        match = _COPY_HEADER.match(lines[i])
-        if not match:
-            i += 1
-            continue
-        table = match.group(1)
-        columns = [c.strip() for c in match.group(2).split(",")]
-        i += 1
-        body_lines: list[str] = []
-        while lines[i] != "\\.":
-            body_lines.append(lines[i])
-            i += 1
-        i += 1  # skip the "\." terminator itself
-        if table == "film_embedding":
-            continue
-        body = ("\n".join(body_lines) + "\n").encode("utf-8")
-        yield table, columns, body
-
-
-async def _load_data_file(connection_url: str, data_file: Path) -> None:
-    conn = await asyncpg.connect(connection_url)
-    try:
-        data_sql = data_file.read_text()
-        for table, columns, body in _iter_copy_blocks(data_sql):
-            # asyncpg treats a plain `bytes` source as a file *path* to
-            # open, not as the data itself -- it only reads data in-memory
-            # from something with a .read() method, hence the BytesIO.
-            await conn.copy_to_table(table, source=io.BytesIO(body), columns=columns, format="text")
-    finally:
-        await conn.close()
+        raise SystemExit(f"psql failed {description}:\n{result.stderr}")
 
 
 def load(psql_path: str, connection_url: str, cache_dir: Path) -> None:
@@ -217,8 +213,21 @@ def load(psql_path: str, connection_url: str, cache_dir: Path) -> None:
     _download_if_missing(SCHEMA_URL, schema_file)
     _download_if_missing(DATA_URL, data_file)
 
-    _run_schema_file(psql_path, connection_url, schema_file)
-    asyncio.run(_load_data_file(connection_url, data_file))
+    patched_schema = _patch_schema(schema_file.read_text())
+    patched_data = _patch_data(data_file.read_text())
+    # pg_dump's own preamble (inside patched_schema) runs
+    # `SELECT pg_catalog.set_config('search_path', '', false);`, a
+    # deliberate pg_dump safety practice -- harmless for *this* session
+    # since every CREATE in the dump is already schema-qualified. But
+    # on a host whose connection pooler doesn't reset session state
+    # between reused connections (confirmed by testing against one),
+    # that empty search_path otherwise leaks to the *next* unrelated
+    # connection -- including, eventually, the live app's own. Setting
+    # it back explicitly, as the session's last act, is what actually
+    # matters here, not just leaving it to each caller to remember.
+    combined_sql = patched_schema + "\n" + patched_data + "\nSET search_path TO public;\n"
+
+    _run_psql(psql_path, connection_url, combined_sql, f"applying {schema_file} and {data_file}")
 
 
 def main() -> None:
