@@ -6,11 +6,14 @@ than what a real client actually sees."""
 
 import asyncio
 
+import httpx2
 import pytest
 from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.memory import create_client_server_memory_streams
 
 from app.auth.models import Workspace
+from app.main import app
 from app.mcp.server import mcp
 
 pytestmark = pytest.mark.asyncio
@@ -51,3 +54,54 @@ async def test_tool_calls_through_the_real_protocol(
                 assert "invalid or revoked" in str(bad_key.content)
         finally:
             server_task.cancel()
+
+
+async def test_tool_calls_over_real_http_transport_with_header_auth(
+    seeded_workspace: tuple[Workspace, str],
+) -> None:
+    """The in-memory-streams test above exercises the MCP protocol
+    itself, but never the actual HTTP mount (app/main.py) or the new
+    Authorization-header auth path -- ctx.headers is always None on
+    that in-memory transport, so a regression there would pass that
+    test while silently breaking every real HTTP client. Drives this
+    through httpx2's ASGI transport (real ASGI HTTP semantics, no real
+    socket needed) against the app's actual mounted /mcp route, with
+    the API key set as a header and never passed as a tool argument at
+    all -- proving the header path works on its own, not just as a
+    fallback alongside the argument."""
+    _, api_key = seeded_workspace
+
+    # app.mount() doesn't run a mounted sub-app's lifespan automatically
+    # (see app/main.py's own comment on this) -- entering it by hand
+    # here is what actually starts the MCP session manager background
+    # task that /mcp's requests depend on.
+    async with app.router.lifespan_context(app):
+        transport = httpx2.ASGITransport(app=app)
+        # base_url must be an actual host:port the SDK's DNS-rebinding
+        # protection allows for a loopback-bound server -- confirmed by
+        # actually running this: "http://testserver" (httpx's usual
+        # placeholder) was rejected outright, and even "http://localhost"
+        # alone still was, since the allowed-hosts check requires a
+        # ":<port>" suffix to match its "localhost:*" pattern, not just
+        # the bare hostname. The port number itself doesn't matter --
+        # nothing is actually listening on it here.
+        async with (
+            httpx2.AsyncClient(
+                transport=transport,
+                base_url="http://localhost:8000",
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as http_client,
+            streamable_http_client("http://localhost:8000/mcp", http_client=http_client) as (
+                read_stream,
+                write_stream,
+            ),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
+
+            good = await session.call_tool("list_tables", {})
+            assert good.is_error is False
+
+            bad_table = await session.call_tool("describe_table", {"table_name": "does_not_exist"})
+            assert bad_table.is_error is True
+            assert "does_not_exist" in str(bad_table.content)

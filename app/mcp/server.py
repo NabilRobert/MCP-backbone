@@ -8,7 +8,7 @@ import functools
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from app.auth.service import AuthenticationError, authenticate
@@ -18,6 +18,29 @@ from app.query import service as query_service
 from app.query.service import QueryExecutionError
 
 mcp = MCPServer("database-mcp")
+
+
+def _resolve_api_key(ctx: Context, api_key: str | None) -> str:
+    """Prefers a real HTTP client's "Authorization: Bearer <key>"
+    header over the explicit api_key argument below -- the header is
+    the standard way a remote MCP client authenticates, and it means
+    the AI model never has to be told to fill in a credential at all.
+    Falls back to the argument for stdio/in-memory transport, where
+    there's no HTTP request to carry a header on (ctx.headers is None
+    there) -- this is exactly what scripts/run_benchmark.py's own
+    key-injecting wrapper already relies on, so this stays working
+    unchanged for it. Checked case-insensitively by hand rather than
+    assuming a specific headers object's own case handling, since
+    ctx.headers is typed as a plain Mapping."""
+    headers = ctx.headers or {}
+    auth_header = next((v for k, v in headers.items() if k.lower() == "authorization"), None)
+    if auth_header:
+        return auth_header.removeprefix("Bearer ").strip()
+    if api_key:
+        return api_key
+    raise AuthenticationError(
+        "missing API key (expected an Authorization header or the api_key argument)"
+    )
 
 
 def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
@@ -42,37 +65,41 @@ def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Await
 
 @mcp.tool()
 @_translate_errors
-async def list_tables(api_key: str) -> list[str]:
+async def list_tables(ctx: Context, api_key: str | None = None) -> list[str]:
     """Tool: "what tables exist in my database?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, api_key)
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
         return await query_service.list_tables(session, workspace)
 
 
 @mcp.tool()
 @_translate_errors
-async def describe_table(api_key: str, table_name: str) -> dict[str, Any]:
+async def describe_table(
+    ctx: Context, table_name: str, api_key: str | None = None
+) -> dict[str, Any]:
     """Tool: "what columns does this specific table have?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, api_key)
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
         return await schema_cache.describe_table(session, workspace, table_name)
 
 
 @mcp.tool()
 @_translate_errors
-async def sample_rows(api_key: str, table_name: str, limit: int = 10) -> list[dict[str, Any]]:
+async def sample_rows(
+    ctx: Context, table_name: str, limit: int = 10, api_key: str | None = None
+) -> list[dict[str, Any]]:
     """Tool: "show me a few example rows from this table.\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, api_key)
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
         return await schema_cache.sample_rows(session, workspace, table_name, limit)
 
 
 @mcp.tool()
 @_translate_errors
-async def run_query(api_key: str, sql: str) -> dict[str, Any]:
+async def run_query(ctx: Context, sql: str, api_key: str | None = None) -> dict[str, Any]:
     """Tool: "run this SQL and give me the results." This is the one
     that goes through every safety check (see app/query/validation.py
     and app/query/cost_check.py) before anything actually executes."""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, api_key)
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
         return await query_service.run_query(session, workspace, sql)
