@@ -158,3 +158,12 @@ fixing it. `README.md` is the front door to all of that.
 - The console's pages are verified via FastAPI's `TestClient` (the real
   HTTP layer), but never visually confirmed in an actual browser — a
   preview-sandbox limitation hit while building it, see JOURNEY.md.
+- The real target database (`APP_TARGET_DATABASE_URL`, now loaded with
+  Pagila) has no DB-level read-only role yet — the connecting account
+  on that managed host can't `CREATE ROLE`, so
+  `scripts/provision_readonly_role.py` can't run against it. That
+  database currently relies on the app-level validator alone, not the
+  defense-in-depth role-level block THREAT_MODEL.md describes. See
+  JOURNEY.md for why, and for a real session-state leak this same
+  target host's connection pooler caused and how the loader now avoids
+  it.

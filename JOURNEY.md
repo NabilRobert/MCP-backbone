@@ -449,3 +449,75 @@ rental) returns sensible results. `film_embedding`'s own data rows are
 skipped the same way on the COPY side, so nothing is left trying to
 load into a table that no longer exists.
 
+## 2026-10-15 (continued) — Pointing it at the real target DB, scrubbed first
+
+Arthur's real `APP_TARGET_DATABASE_URL` turned out not to be empty --
+42 leftover tables from an old, no-longer-used retail/POS schema
+(Indonesian table names: `Barang`, `Pelanggan`, `Penjualan`, etc).
+Confirmed unused, confirmed fine to scrub. `DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;` cleared it in one step.
+
+It's a real managed/pooled Postgres host (behind what's almost
+certainly PgBouncer, on port 6432), not a plain local container, and
+that surfaced three more real bugs the local Docker test never could:
+
+1. The connecting role has `rolcreaterole = false` -- a normal
+   restriction on a managed, non-superuser account. This means
+   `scripts/provision_readonly_role.py` can't run against this host
+   with the current credential: there's no dedicated read-only role
+   here yet, just the one account that owns everything. Flagged, not
+   fixed -- needs either a second admin-ish credential from whoever
+   manages the host, or accepting this target has only the app-level
+   validator as its defense for now, not the DB-level role too.
+2. pg_dump bakes `ALTER ... OWNER TO postgres;` onto every single
+   object (106 of them) -- fine on the local test container, where the
+   connecting superuser genuinely is named `postgres`, but a hard
+   failure here (`must be able to SET ROLE "postgres"`) since this
+   account can't reassign ownership to a role it doesn't control.
+   Dropped those statements outright: whoever runs the `CREATE` already
+   owns the object, so they were never doing anything useful anyway.
+3. The data file's own pg_dump preamble sets
+   `transaction_timeout = 0`, a GUC that doesn't exist before Postgres
+   17 -- it was dumped from a newer server (17.10) than the schema file
+   (12.11) and this project's own target (16). Stripped that one line.
+
+Fixing bug 2 meant rethinking the original design: the schema and data
+files were being run through two *separate* connections (`psql` for
+the schema, a raw `asyncpg` connection for the data's `COPY` blocks).
+Right after the schema succeeded, the very next `asyncpg` connection
+failed with `relation "actor" does not exist` -- on a database that
+provably had that table, seconds old. Chased this as a pooler
+replica-lag theory first and wasted real time on it before checking
+the obvious thing: `SHOW search_path;` on a fresh connection came back
+*empty*. pg_dump's own preamble runs
+`SELECT pg_catalog.set_config('search_path', '', false);` -- completely
+harmless inside the schema's own session, since every one of its
+`CREATE` statements is already schema-qualified -- but this host's
+connection pooler isn't resetting session state between reused
+connections, so that empty search_path leaked straight onto the next
+unrelated connection. Confirmed by running `RESET search_path;` across
+a batch of fresh connections and watching `SHOW search_path` settle
+back to normal.
+
+That's a real, load-bearing bug, not just an inconvenience: left
+alone, it would eventually have leaked onto the *live app's own*
+connection to this same target database, breaking every unqualified
+query (`SELECT * FROM film`, exactly what an AI client would actually
+send) with "relation does not exist" at some unpredictable point
+after a deploy, for a reason that would've looked nothing like its
+actual cause. Fixed two ways: merged the schema and data loading into
+one continuous `psql` session instead of two separate connections
+(pg_dump's COPY format is designed to be fed straight to `psql`
+alongside the schema -- the separate `asyncpg` COPY path was never
+necessary), and appended an explicit `SET search_path TO public;` as
+the session's last statement, so the connection is handed back to the
+pool clean instead of trusting every future caller to remember to
+reset it themselves.
+
+Re-verified the complete fix against the real target: scrubbed,
+reloaded, then checked `SHOW search_path` across eight fresh
+connections with no manual cleanup in between -- all came back
+`public`. Re-ran the same loader against the local disposable
+container too, to confirm the single-session rewrite didn't regress
+the case that already worked.
+
