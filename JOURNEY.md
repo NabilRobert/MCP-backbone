@@ -521,3 +521,74 @@ connections with no manual cleanup in between -- all came back
 container too, to confirm the single-session rewrite didn't regress
 the case that already worked.
 
+## 2026-10-15 (continued) — Calibrating APP_COST_THRESHOLD against real data
+
+`APP_COST_THRESHOLD` (100,000) had been a round, made-up number since
+Phase 6 -- the whole reason to load Pagila instead of
+`load_demo_dataset.py`'s thin synthetic data was to finally have
+something real to measure against. Ran `EXPLAIN (FORMAT JSON)` (no
+execution, just the planner's own cost estimate) against the real
+Pagila-loaded target for two groups of queries: realistic exploratory
+ones an AI client would actually send, and deliberately wasteful ones
+meant to represent what the check exists to catch.
+
+Legitimate queries measured (Postgres planner cost units, not seconds
+or dollars):
+
+| query | cost |
+|---|---|
+| `SELECT * FROM film LIMIT 10` | 0.8 |
+| `SELECT COUNT(*) FROM customer` | 44.5 |
+| filter film by rating | 80.5 |
+| top customers by rental count (2-join + GROUP BY) | 1,603.7 |
+| revenue per customer, all partitions, no LIMIT | 1,664.1 |
+| `SELECT *` the entire 51,805-row rental table, no LIMIT | 1,122.0 |
+| top films by category (5-table join + GROUP BY), LIMIT 10 | 21,169.9 |
+| same 5-table join + GROUP BY, no LIMIT at all | 18,520.1 |
+
+Deliberately wasteful queries measured:
+
+| query | cost |
+|---|---|
+| `address` x `city` cross join (~600K rows) | 7,557.0 |
+| `film` x `customer` cross join (~999K rows) | 12,610.0 |
+| `customer` self cross join (~998K rows) | 12,561.5 |
+| `inventory` x `customer` cross join (~4.6M rows) | 57,325.5 |
+| `inventory` x `inventory` cross join (~21M rows) | 262,482.6 |
+| `film` x `film` x `film` cross join (~1B rows) | 12,512,739.0 |
+| `rental` x `payment` cross join (~2.6B rows) | 33,067,840.4 |
+| `rental` self cross join (~2.68B rows) | 33,549,348.9 |
+
+The real finding, not anticipated going in: **cost doesn't track
+"wastefulness" the way intuition suggests.** The heaviest *legitimate*
+query (the 5-table join with a GROUP BY, 21,169.9) costs more than
+several of the *wasteful* cross joins (7,557–12,610), because its cost
+comes from touching Pagila's actual larger tables through several real
+joins plus a sort for GROUP BY, while a cross join of two small
+dimension tables (film: 1,000 rows, customer: 999 rows) is cheap in
+planner terms almost by definition -- not enough base rows on either
+side for the multiplication to get expensive yet. No single threshold
+can both admit the legitimate query and reject those three cross
+joins; one of those has to give.
+
+Checked whether that gap is an actual availability risk before
+accepting it: timed the worst offender in the blind spot (`film` x
+`customer`, ~999,000 output rows) for real. It ran in **0.2 seconds**
+against the real remote target, over the network. At Pagila's scale, a
+cross join confined to small dimension tables isn't slow -- it's just
+more rows than useful, which is a nuisance, not a denial-of-service
+vector. `APP_QUERY_TIMEOUT_SECONDS` (the actual execution-time backstop,
+separate from this pre-execution cost estimate) would never even
+trigger for it.
+
+Set `APP_COST_THRESHOLD=40,000`: a little under 2x headroom above the
+real legitimate ceiling (21,169.9), and comfortably below the point
+where cross joins start actually mattering (57,325.5, the first one
+touching a table with thousands of rows rather than hundreds) --
+everything from there up to the catastrophic cases (millions) is
+caught cleanly. The accepted, documented gap: a cross join confined to
+tables in the hundreds-of-rows range slips under 40,000 -- proven
+harmless at Pagila's current scale by the timing test above, not just
+assumed. Worth re-measuring if the target dataset's dimension tables
+ever grow by an order of magnitude or more.
+

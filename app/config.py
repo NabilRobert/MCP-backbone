@@ -22,7 +22,11 @@ class Settings(BaseSettings):
     target_database_url: str  # the outside database AI clients can query
     query_timeout_seconds: int = 5  # kill a real query after this long
     explain_timeout_seconds: int = 2  # kill the cost-estimate step after this long
-    cost_threshold: int = 100_000  # reject a query estimated pricier than this
+    # Reject a query estimated pricier than this. Calibrated against
+    # real Pagila data -- see .env.example and JOURNEY.md for the
+    # actual measurements behind this number and a known gap it
+    # doesn't close.
+    cost_threshold: int = 40_000
     demo_rate_limit: int = 5  # max requests per workspace per window
     demo_rate_limit_window_seconds: int = 3600  # how long that window is
     # Signs the web console's login session cookie. If left unset, a

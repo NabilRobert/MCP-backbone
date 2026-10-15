@@ -151,8 +151,15 @@ fixing it. `README.md` is the front door to all of that.
 
 ## Open gaps, as of this writing
 
-- `APP_COST_THRESHOLD` is still a guessed placeholder, never calibrated
-  against real data.
+- `APP_COST_THRESHOLD` is now calibrated against real Pagila data
+  (40,000 -- see JOURNEY.md for the full measurements), not guessed.
+  One real, accepted gap surfaced doing that: a cross join confined to
+  small dimension tables (hundreds of rows each) costs *less* than the
+  heaviest legitimate analytical query, so no single threshold can
+  admit the one and reject the other -- empirically proven harmless at
+  Pagila's current scale (ran in 0.2s), not just assumed, but worth
+  re-checking if the target dataset's tables grow by an order of
+  magnitude.
 - The Slice E benchmark is built and verified end to end except for an
   actual AI model call, which needs a real API key in `.env`.
 - The console's pages are verified via FastAPI's `TestClient` (the real
