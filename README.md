@@ -69,6 +69,16 @@ a browser, and why the TestClient coverage made that non-blocking.
 
 All seven slices from `phase-7-slices-plan.md` are now built.
 
+**Pagila, a richer dataset.** `scripts/load_demo_dataset.py`'s
+hand-written rows are enough to exercise the code paths but too thin
+to demo convincingly or to calibrate `APP_COST_THRESHOLD` against.
+`scripts/load_pagila_dataset.py` loads [Pagila](https://github.com/devrimgunduz/pagila)
+instead -- a real, widely-known public Postgres sample database (a
+DVD-rental store, 16+ tables, ~1,000 films, ~50,000 rentals) -- as an
+optional, more credible alternative target. See JOURNEY.md for the
+version-compatibility bugs real runs against a live Postgres 16
+instance turned up getting it working.
+
 ## Layout
 
 ```

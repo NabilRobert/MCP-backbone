@@ -387,3 +387,65 @@ in-process, hitting the actual HTTP layer rather than just the
 underlying functions. A screenshot would have been nice to have, not
 proof of anything the tests didn't already cover.
 
+## 2026-10-15 — Loading Pagila as a richer demo dataset
+
+`load_demo_dataset.py`'s synthetic data was never meant to be a
+credible demo or a basis for calibrating `APP_COST_THRESHOLD` -- it's
+a handful of hand-written rows. Arthur agreed to use Pagila instead (a
+real, widely-known public Postgres sample database: a DVD-rental
+store with 16+ tables, ~1,000 films, ~1,000 customers, ~50,000
+rentals), so `scripts/load_pagila_dataset.py` downloads the upstream
+schema and data dumps and loads them into a target database. Three
+real bugs, each found only by actually running it against a live
+Postgres container, not by reading the dump files first:
+
+1. The upstream schema defaults UUID columns to `uuidv7()`, a Postgres
+   18+ builtin. The project's test database is Postgres 16. Patched to
+   `gen_random_uuid()` (core since Postgres 13) -- same shape of UUID,
+   just without `uuidv7`'s time-sortable ordering, which nothing here
+   depends on.
+2. One generated column is declared `VIRTUAL` (also Postgres 18+
+   only). Patched to `STORED` (supported since Postgres 12) -- a
+   storage/performance tradeoff, not a semantic one.
+3. The schema also defines an optional `film_embedding` table (a
+   20-dim vector column plus an HNSW index) behind `CREATE EXTENSION
+   vector`. `pgvector` isn't installed on the plain `postgres:16-alpine`
+   image this project uses, and nothing in the MCP server does
+   embeddings or vector search, so rather than add an extension purely
+   to load sample data that would never be used, the loader parses the
+   schema into individual statements (a small hand-written splitter
+   that's aware of dollar-quoted function bodies, `--` comments, and
+   string literals, since a naive split on `;` would corrupt both
+   pg_dump's own multi-semicolon comment headers and every PL/pgSQL
+   trigger body) and drops any statement that mentions the extension
+   or the table.
+
+That filter's first version matched the plain substring `"vector"`,
+which also matched `tsvector` -- the real `film` table's full-text
+search column type -- and silently deleted the entire `CREATE TABLE
+film` statement along with it, surfacing one migration-batch later as
+a confusing `relation "public.film" does not exist` error on an
+unrelated `ALTER TABLE`. Fixed by matching `vector` as a whole word
+(`\bvector\b`) instead, which doesn't match inside `tsvector` or
+`tsvector_update_trigger` but still catches `CREATE EXTENSION vector`
+and the `vector(20)` column type. `film_embedding` stays a plain
+substring match on purpose -- constraint and index names like
+`film_embedding_pkey` and `film_embedding_embedding_hnsw_idx` need it.
+
+A fourth bug, in the data-loading half: asyncpg's `copy_to_table`
+treats its `source` argument as a file *path* unless it has a `.read()`
+method -- passing the already-downloaded row data as plain `bytes`
+made it try to `open()` the data itself as a filename, which failed
+with "File name too long" (not a permissions or missing-extension
+error, so it took a moment to place). Fixed by wrapping the bytes in
+`io.BytesIO()` first.
+
+Verified end to end against the disposable `jarvis-mcp-test-db`
+container: full schema applies cleanly, `film_embedding` is
+confirmed absent afterward, row counts land where the upstream dump
+says they should (1,000 films, 999 customers, ~51,800 rentals, ~51,000
+payments), and a real multi-table join (film → category → inventory →
+rental) returns sensible results. `film_embedding`'s own data rows are
+skipped the same way on the COPY side, so nothing is left trying to
+load into a table that no longer exists.
+

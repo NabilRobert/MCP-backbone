@@ -122,6 +122,11 @@ setting things up:
 - **`load_demo_dataset.py`** — fills a target database with
   fake-but-realistic sample data (customers/orders/products) to test and
   demo against.
+- **`load_pagila_dataset.py`** — an alternative, richer target: loads
+  Pagila, a real public Postgres sample database, instead of the
+  hand-written data above. See JOURNEY.md for why a plain substring
+  filter almost deleted the real `film` table while stripping out the
+  (unused) pgvector extension this schema optionally ships with.
 - **`seed_eval_cases.py`** / **`run_benchmark.py`** — the Slice E
   benchmark: write the test questions, then run them against a real AI
   model and grade the results.
