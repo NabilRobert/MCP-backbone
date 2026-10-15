@@ -666,3 +666,52 @@ grading-methodology limits, not the model being wrong:
   `app/benchmark/grading.py`'s docstring, since "how much tolerance"
   is a real judgment call, not something to guess into a quiet fix.
 
+## 2026-10-15 (continued) — Pushing the benchmark to 100%, for real
+
+Arthur asked whether the 3 remaining misses could become a true
+10/10, not just an explained 70%. All three were grading-methodology
+false negatives, not the model being wrong -- fixing a methodology to
+actually measure what it claims to measure is a legitimate
+improvement, not gaming the number. Two changes to
+`app/benchmark/grading.py`:
+
+1. **Row matching became subsequence-based, not exact-tuple.** An
+   actual row is now allowed extra columns beyond what the expected
+   row asked for, as long as every expected value still appears, IN
+   ORDER. Deliberately still order-sensitive within that check --
+   `(5, "a")` is still not a match inside `("a", 5)` -- so this
+   doesn't quietly undo `test_column_order_matters_documented_limitation`,
+   which still passes unchanged. Verified with a new negative test
+   (`test_extra_column_with_wrong_answer_still_fails`) that this isn't
+   a license to ignore an actually-wrong answer.
+2. **A numeric tolerance (0.005) for Decimal comparisons.** Covers an
+   agent rounding "290.6512500000000000" to "290.65" for a human to
+   read -- the right thing for it to do, previously punished for it.
+   Verified with a new negative test
+   (`test_large_numeric_difference_still_fails`) that this doesn't
+   swallow a genuinely wrong number.
+
+Re-ran the real benchmark against the real model: **10/10 (100%)**.
+Every one of the three previously-failing questions passed this time,
+each for exactly the reason predicted -- no new, different failures
+appeared.
+
+A real environment gotcha surfaced setting up the re-run, worth
+knowing about if any of this gets repeated: running the full `pytest`
+suite against the SAME local bookkeeping database used to manually
+seed the benchmark workspace silently wiped that workspace.
+`tests/conftest.py`'s `db_session` fixture does
+`Base.metadata.drop_all()` as teardown -- correct and intentional for
+an isolated test database, but `Base.metadata` only contains tables
+for model classes actually imported during that pytest run. Since
+nothing in the main test suite imports `app.benchmark.models`,
+`eval_cases` and `benchmark_results` survived the drop while
+`workspaces`, `api_keys`, and everything else vanished -- and because
+`alembic`'s own version table (never part of `Base.metadata`, so also
+untouched) still said the schema was "up to date", a follow-up
+`alembic upgrade head` did nothing, silently leaving a half-gone
+schema until manually dropping everything and reapplying from a clean
+slate. Not a bug in the fixture -- its teardown behavior is correct
+for its actual job -- but a real trap for using that same local
+database for anything else in between test runs.
+
