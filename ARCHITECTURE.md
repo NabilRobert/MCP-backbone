@@ -138,6 +138,15 @@ setting things up:
 - **`seed_eval_cases.py`** / **`run_benchmark.py`** — the Slice E
   benchmark: write the test questions, then run them against a real AI
   model and grade the results.
+- **`stdio_bridge.py`** — lets a stdio-only MCP client (Claude Desktop,
+  etc.) use a server that's actually deployed remotely over HTTP: it's
+  spawned locally like any other stdio server, and just forwards every
+  message onward to the real one over HTTP (with an API key as a
+  Bearer header), and every response back. A Python-native alternative
+  to the Node-based `mcp-remote` bridge, for anyone who'd rather not
+  add a Node dependency for this one thing. Verified by actually
+  spawning it as a subprocess and driving it with the MCP SDK's own
+  stdio client, not just reasoned about.
 
 ## `tests/` mirrors `app/`
 

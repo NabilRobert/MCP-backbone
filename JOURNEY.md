@@ -783,3 +783,34 @@ a rejected bad key, and a real `run_query` all confirmed working, not
 assumed. Cleaned up every throwaway workspace/database this created
 afterward.
 
+## 2026-10-15 (continued) — A Node-free way to point Claude Desktop at it
+
+Walking through how Arthur would actually connect Claude Desktop to a
+deployed instance, the standard answer is `mcp-remote`, a Node-based
+CLI bridge that forwards a local stdio client to a remote HTTP server
+with custom headers. Asked for an alternative -- not everyone wants a
+Node dependency for one thing in an otherwise all-Python project.
+
+Checked first whether the `mcp` SDK already ships something like this
+(`pip show -f mcp`'s entry point, `mcp.cli`) -- it doesn't; `dev`,
+`run`, and `install` are all about running/registering a *local*
+server, nothing about bridging to a remote one.
+
+Wrote `scripts/stdio_bridge.py` instead: a ~45-line script using the
+SDK's own `streamable_http_client` (outbound leg, with the API key as
+a Bearer header) and `stdio_server` (inbound leg, what Claude Desktop
+actually talks to), joined by two concurrent forwarding loops. The one
+real wrinkle: `ReadStream` can yield either a real message or an
+`Exception` (a malformed message on that side), while `WriteStream`
+only accepts real messages -- blindly forwarding whatever comes out of
+read into write would try to `.send()` an Exception object. Raises
+instead of forwarding it in that case.
+
+Verified by actually spawning it as a subprocess and driving it with
+the MCP SDK's own `stdio_client` -- exactly what Claude Desktop does,
+not an approximation of it -- against a real running server: a
+`list_tables` call succeeded and a `describe_table` call for a
+nonexistent table correctly came back as an error, both carried
+correctly across the bridge. Cleaned up the throwaway workspace and
+database afterward.
+
