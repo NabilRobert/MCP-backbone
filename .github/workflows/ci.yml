@@ -24,6 +24,15 @@ jobs:
           --health-retries 5
 
     env:
+      # APP_DATABASE_URL (this project's own bookkeeping DB) needs an
+      # account with CREATEROLE, wherever it lives: the red-team suite
+      # provisions a real, throwaway Postgres role to prove the
+      # database itself blocks a write, not just the app's validator.
+      # The default "postgres" superuser here covers that -- don't
+      # repoint this at a restricted, shared-tenant managed host, even
+      # one with full read/write access, or those tests fail with
+      # "permission denied to drop role". See README.md's
+      # "APP_DATABASE_URL privilege requirement" section.
       APP_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
       APP_TARGET_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
 

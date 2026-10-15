@@ -104,3 +104,39 @@ The console's TypeScript is compiled separately:
 ```
 cd static-src && npm install && npm run build
 ```
+
+## Running tests: the `APP_DATABASE_URL` privilege requirement
+
+This isn't a local-vs-remote thing -- it's about privilege level.
+`APP_DATABASE_URL` (this project's own bookkeeping database) needs an
+account with `CREATEROLE`, wherever that database actually lives.
+Several tests (`tests/test_red_team.py`'s defense-in-depth suite in
+particular) provision a real, throwaway Postgres role via
+`scripts/provision_readonly_role.py` to prove the database itself
+blocks a write, not just the app's own validator -- deliberately, so
+that proof isn't faked.
+
+A *shared, restricted-tenant* host -- even one you otherwise have full
+read/write access to -- will fail those tests with `permission denied
+to drop role`, not because anything's broken, but because withholding
+`CREATEROLE` from ordinary accounts is exactly what that kind of
+hosting tier is supposed to do. A self-hosted remote Postgres (your
+own VPS, your own superuser) works just as well as a local one --
+what matters is control over the account, not where the machine is.
+CI's own Postgres service container (`.github/workflows/ci.yml`) is
+technically remote too (a fresh container on GitHub's runner), and it
+passes 100% because it connects as the default `postgres` superuser.
+
+For local dev, a disposable container is the easiest way to get that:
+
+```
+docker run -d --name jarvis-mcp-app-db \
+  -e POSTGRES_USER=jarvis -e POSTGRES_PASSWORD=jarvis -e POSTGRES_DB=jarvis_mcp \
+  -p 5432:5432 postgres:16-alpine
+```
+
+`APP_TARGET_DATABASE_URL` (the database being *queried*, not this
+project's own) has no such requirement, and realistically *shouldn't*
+have it -- it's meant to model exactly the kind of restricted external
+database this project doesn't control, so it can keep pointing at a
+managed, multi-tenant host indefinitely.
