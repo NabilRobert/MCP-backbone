@@ -43,15 +43,19 @@ on every push. Not yet deployed to the VPS -- Arthur deploys by pulling
 from this repo. Not yet tested against a real AI client (e.g. Claude
 Desktop) over actual stdio -- only the in-memory protocol path so far.
 
-**Slice E (benchmark) is built and verified short of an actual model
-call**: `scripts/run_benchmark.py` runs a PydanticAI agent against this
-server as a real MCP client, grading by execution accuracy against ten
+**Slice E (benchmark) now run for real**: `scripts/run_benchmark.py`
+runs a PydanticAI agent (`gpt-5-mini` via Sumopod) against this server
+as a real MCP client, grading by execution accuracy against ten
 hand-written questions over a synthetic demo dataset
-(`scripts/load_demo_dataset.py`). Every piece short of real model
-intelligence is confirmed working (see JOURNEY.md) using PydanticAI's
-free `TestModel` stub. Running it for real needs an `ANTHROPIC_API_KEY`
-in `.env` -- Arthur's own key, his own cost, not something to spend
-without asking.
+(`scripts/load_demo_dataset.py`). **7/10 (70%)** on the real run, after
+fixing two real bugs the first attempt surfaced -- the per-workspace
+rate limit exhausting mid-benchmark, and a Decimal-vs-string type
+mismatch between the agent's MCP-serialized answer and the ground
+truth's raw DB value that failed every numeric answer regardless of
+correctness. The three remaining misses are grading-methodology
+limits, not the model being wrong (no rounding tolerance; an extra,
+genuinely informative column counts as a different answer) -- see
+JOURNEY.md for the full breakdown.
 
 **Slice F (red-team suite) done** -- 16 adversarial tests against the
 safety layer, including genuine defense-in-depth against a real

@@ -592,3 +592,77 @@ harmless at Pagila's current scale by the timing test above, not just
 assumed. Worth re-measuring if the target dataset's dimension tables
 ever grow by an order of magnitude or more.
 
+## 2026-10-15 (continued) — Running Slice E's benchmark for real
+
+Everything up to this point had only run against PydanticAI's free
+`TestModel` stub. First real run, against `gpt-5-mini` via Sumopod:
+**3/10 (30%)**. Didn't take that number at face value -- half the
+failures came back with `actual SQL: None`, meaning the harness never
+even captured a query, not that the model got one wrong. That's a
+different kind of failure and worth chasing before reporting an
+accuracy number built partly out of it.
+
+Set up for the run first: a dedicated local demo database
+(`benchmark_demo`, loaded via `load_demo_dataset.py` -- the toy
+storefront schema these eval questions target, not Pagila), a seeded
+workspace pointing at it, and `alembic upgrade head` against the new
+local bookkeeping DB (`jarvis-mcp-app-db` from the pytest fix earlier)
+-- its tables never existed outside of pytest's own
+create-then-drop-per-test fixture until now.
+
+Dug into one `None` case directly (dumped the agent's full message
+history, not just the final summary) and found the real cause:
+`APP_DEMO_RATE_LIMIT` (5 requests per workspace per hour) is sized for
+occasional real usage, not an automated loop that burns 2-4+ tool
+calls (`list_tables`, `describe_table`, `run_query`, sometimes retried)
+per question. By question 2 or 3 of 10, every further `run_query` call
+came back `{"status": "rejected", "error": "rate limit ... exceeded"}`
+-- and the model, correctly, reported that it couldn't get a real
+answer rather than making one up. Good model behavior, bad benchmark
+setup: the 30% number was mostly measuring the rate limiter, not the
+model. Fixed by temporarily raising `APP_DEMO_RATE_LIMIT` in `.env` for
+the duration of this run only, then reverting it -- this is a real
+production anti-abuse setting, not something to weaken permanently for
+a benchmark's convenience.
+
+With that cleared, two of the remaining questions still failed with a
+real `actual_sql` captured, which pointed at a second, genuine bug
+rather than a rate-limit artifact. One of them -- "total revenue" --
+had an answer that LOOKED numerically identical to the ground truth
+(387684.66 both ways, confirmed by hand in psql) but still graded as
+wrong. Chased it by dumping the tool call's raw return value directly
+and found: `value='387684.66' type=str`. The "expected" side comes
+from a direct DB connection and keeps Decimal as Decimal; the "actual"
+side comes back through a real MCP tool call, and Decimal isn't a
+JSON type, so it arrives as a string. `Decimal("387684.66") ==
+"387684.66"` is `False` in Python -- this would have failed EVERY
+numeric-answer question, independent of whether the agent's SQL was
+right, and the existing grading unit tests never caught it because
+their fixtures matched types on both sides by construction, never
+exercising a real MCP round-trip. Fixed in
+`app/benchmark/grading.py` (`_normalize_value`, parses anything
+number-shaped into a `Decimal` on both sides before comparing) with a
+regression test built from this exact failure
+(`test_decimal_serialized_as_string_still_matches`).
+
+Re-ran the full benchmark with both fixes in place: **7/10 (70%)** --
+a real, credible number this time, not one partly measuring
+infrastructure. The three remaining misses, checked individually, are
+grading-methodology limits, not the model being wrong:
+
+- "Which country has the most customers?" and "What is the name of the
+  most expensive product?" -- the agent's SQL was correct both times,
+  but it included one extra, genuinely useful column (the count, the
+  price) alongside the answer the question asked for. `rows_equal`
+  compares full row shape, not just the asked-for column, so a more
+  informative answer than the ground truth's grades as wrong. Already
+  a documented tradeoff (`test_column_order_matters_documented_limitation`
+  covers the same underlying behavior), not a new bug.
+- "What is the average price of products in the 'books' category?" --
+  the agent rounded to 290.65 for readability; `expected_sql` doesn't
+  round, giving 290.6512500000000000. Numerically different, humanly
+  the same answer. No rounding tolerance exists in `rows_equal` --
+  documented as a known, deliberately-unfixed gap in
+  `app/benchmark/grading.py`'s docstring, since "how much tolerance"
+  is a real judgment call, not something to guess into a quiet fix.
+

@@ -160,8 +160,13 @@ fixing it. `README.md` is the front door to all of that.
   Pagila's current scale (ran in 0.2s), not just assumed, but worth
   re-checking if the target dataset's tables grow by an order of
   magnitude.
-- The Slice E benchmark is built and verified end to end except for an
-  actual AI model call, which needs a real API key in `.env`.
+- The Slice E benchmark has now been run for real (`gpt-5-mini` via
+  Sumopod): 7/10 (70%). Two real bugs the first attempt surfaced are
+  fixed (a too-low rate limit for an automated eval loop; a
+  Decimal-vs-string type mismatch in grading). The 3 remaining misses
+  are a grading-methodology limit (no rounding tolerance) and an
+  already-documented one (extra informative columns count as a
+  different answer), not the model being wrong -- see JOURNEY.md.
 - The console's pages are verified via FastAPI's `TestClient` (the real
   HTTP layer), but never visually confirmed in an actual browser — a
   preview-sandbox limitation hit while building it, see JOURNEY.md.
