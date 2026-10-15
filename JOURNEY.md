@@ -715,3 +715,71 @@ slate. Not a bug in the fixture -- its teardown behavior is correct
 for its actual job -- but a real trap for using that same local
 database for anything else in between test runs.
 
+## 2026-10-15 (continued) — The MCP server can finally be reached over a network
+
+Found, while assessing what's left before this is deployable, that
+there was no way to actually run the MCP server at all -- no `mcp.run()`,
+no entrypoint anywhere, only an importable object exercised through
+in-memory streams in tests. Decided on Streamable HTTP (not stdio,
+which can't be reached remotely; not SSE, the older transport),
+mounted into the same FastAPI app as the console at `/mcp` rather than
+a second process, since this project's whole ethos is staying small
+enough to read end to end.
+
+Also moved auth to a real `Authorization: Bearer <key>` header,
+additively -- each tool now takes an optional `ctx: Context`
+parameter and prefers `ctx.headers`'s header when present, falling
+back to the existing `api_key` argument otherwise. `ctx.headers` is
+`None` on stdio/in-memory transport, so this doesn't disturb anything
+that already worked: `test_mcp_protocol.py`'s in-memory test and
+`scripts/run_benchmark.py`'s own key-injecting wrapper both keep
+passing `api_key` exactly as before. The point of the header path is
+that a real HTTP client (Claude Desktop, etc.) can now authenticate at
+the connection level instead of needing a custom wrapper to stuff a
+credential into every tool call.
+
+Getting this actually working took four real, sequential bugs, each
+found by actually running it, not by reading the SDK's source and
+assuming:
+
+1. **Wrong lifespan.** `mcp.streamable_http_app()` returns its own
+   Starlette app with its own lifespan (a background session-manager
+   task it needs started). `app.mount()` does NOT run a mounted
+   sub-app's lifespan -- Starlette only sends the ASGI "lifespan"
+   protocol to the root app. Without fixing this, `/mcp` would accept
+   a connection and then hang forever, since nothing was ever running
+   to handle it. Fixed with an explicit combined lifespan on the
+   parent FastAPI app that does `async with mcp.session_manager.run():`.
+2. **Double-mounted path.** `mcp.streamable_http_app()` defaults its
+   own internal route to `/mcp`, and mounting that sub-app at `/mcp`
+   again made the real path `/mcp/mcp` -- a plain 404 on the path
+   anyone would actually try first. Fixed by passing
+   `streamable_http_path="/"` so the FastAPI mount prefix is the only
+   `/mcp` in the final path.
+3. **DNS-rebinding protection rejected the test's own Host header.**
+   The SDK auto-enables this for a loopback-bound server (the default
+   `host="127.0.0.1"`), restricting the allowed `Host` header to
+   `127.0.0.1`/`localhost`/`::1` -- *with an explicit port*, confirmed
+   by reading `transport_security.py`'s actual match rule
+   (`host.startswith(base_host + ":")`, so a bare `localhost` with no
+   port doesn't match `"localhost:*"` either). Not a bug -- real DNS
+   rebinding protection working as intended -- just something the
+   test's own base URL had to actually satisfy (`http://localhost:8000`,
+   not `http://testserver`, httpx's usual placeholder).
+4. **A genuinely pre-existing, unrelated process already on the first
+   port tried for the real-socket smoke test** (port 8123, running
+   since August, nothing to do with this project). Not touched;
+   picked a different port instead.
+
+Verified three separate ways, each proving something the last one
+didn't: an in-memory-streams test (the protocol itself, pre-existing);
+a new test using httpx2's ASGI transport against the app's actual
+mounted route with a real `Authorization` header and zero `api_key`
+argument (`test_tool_calls_over_real_http_transport_with_header_auth`
+in `tests/test_mcp_protocol.py`) -- no real socket, but real ASGI HTTP
+semantics; and a real `uvicorn` process on a real TCP port, hit with
+the MCP SDK's own HTTP client over an actual socket -- `list_tables`,
+a rejected bad key, and a real `run_query` all confirmed working, not
+assumed. Cleaned up every throwaway workspace/database this created
+afterward.
+

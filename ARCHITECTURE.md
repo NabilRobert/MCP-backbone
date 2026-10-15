@@ -22,7 +22,12 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    real logic elsewhere. It also has the `_translate_errors` wrapper —
    this turns "the key is wrong" or "that table doesn't exist" into a
    clean message the AI model can actually read, instead of crashing
-   with a scary traceback.
+   with a scary traceback. `_resolve_api_key` is the "who's asking"
+   check itself: a real HTTP client authenticates with a normal
+   `Authorization: Bearer <key>` header (read via the tool's `ctx:
+   Context` parameter), while stdio/in-memory callers keep working
+   exactly as before via the plain `api_key` argument -- the header
+   is only ever a preferred alternative, never a requirement.
 
 2. **`app/auth/service.py`** — "who is this?" Takes the API key the
    request came with, hashes it, looks it up, and either returns the
@@ -97,7 +102,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   typed object the rest of the code uses.
 - **`app/main.py`** — wires the web console's routes into an actual
   running web server (FastAPI), plus the session-cookie middleware the
-  console's login depends on.
+  console's login depends on. Also mounts the MCP server itself at
+  `/mcp` -- one process serves both. Combines its own lifespan with
+  the MCP server's (mounting a sub-app does not run that sub-app's
+  own lifespan automatically; see JOURNEY.md).
 - **`app/console/auth.py`** — the console's login check, against
   `ConsoleCredential` (deliberately separate from `ApiKey` -- see
   app/auth/models.py -- so revoking a compromised API key never locks

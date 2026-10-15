@@ -40,8 +40,21 @@ via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
 the model. 34 passing tests against a real Postgres instance, CI running
 on every push. Not yet deployed to the VPS -- Arthur deploys by pulling
-from this repo. Not yet tested against a real AI client (e.g. Claude
-Desktop) over actual stdio -- only the in-memory protocol path so far.
+from this repo.
+
+**The MCP server can now actually be reached over a network** --
+mounted at `/mcp` on the same FastAPI app as the console (one process,
+one port), using the Streamable HTTP transport. Authentication now
+also accepts a real `Authorization: Bearer <key>` header, in addition
+to (not instead of) the existing `api_key` tool argument, so a real
+HTTP client can authenticate at the connection level instead of
+needing a custom wrapper. Verified three ways: the pre-existing
+in-memory protocol test, a new test against the actual mounted route
+using a real HTTP header and no `api_key` argument at all, and a real
+`uvicorn` process hit over an actual TCP socket. See JOURNEY.md for
+four real bugs (wrong lifespan, a double-mounted path, DNS-rebinding
+protection, an unrelated stray process squatting the first port tried)
+each found only by actually running it.
 
 **Slice E (benchmark) now run for real -- 10/10 (100%)**:
 `scripts/run_benchmark.py` runs a PydanticAI agent (`gpt-5-mini` via
@@ -101,8 +114,15 @@ static-src/   TypeScript source for the console, compiled to app/console/static
 ```
 uv sync
 cp .env.example .env   # fill in real values
+uv run alembic upgrade head   # creates this project's own bookkeeping tables
 uv run uvicorn app.main:app --reload
 ```
+
+This single process now serves both the console (`/console/...`) and
+the MCP server (`/mcp`) -- see the Status section above. `--reload` is
+for local development only (single process, restarts on every file
+change); a real deployment needs a proper process manager and should
+drop that flag.
 
 The console's TypeScript is compiled separately:
 
