@@ -81,9 +81,18 @@ def _build_model() -> Any:
        SUMOPOD_API_KEY isn't set. Set AI_MODEL to something like
        "anthropic:claude-sonnet-4-5" and ANTHROPIC_API_KEY to a normal
        Anthropic key. PydanticAI reads ANTHROPIC_API_KEY automatically --
-       we don't even touch it in this file."""
+       we don't even touch it in this file.
+
+    AI_MODEL has no default here on purpose, in either setup. A silent
+    fallback to some hardcoded model would mean this could end up
+    calling a real, possibly expensive model (Claude Sonnet, say)
+    without anyone actually choosing that -- the whole reason this
+    docstring says "it's your own key and your own cost" is undermined
+    if the script can quietly pick which model that cost is against."""
     sumopod_key = os.environ.get("SUMOPOD_API_KEY")
-    model_name = os.environ.get("AI_MODEL", "anthropic:claude-sonnet-4-5")
+    model_name = os.environ.get("AI_MODEL")
+    if not model_name:
+        raise SystemExit("AI_MODEL is not set in .env -- see .env.example for what to put there.")
 
     if not sumopod_key:
         # Fallback setup: hand the plain model string straight to
