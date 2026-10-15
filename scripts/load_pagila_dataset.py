@@ -37,7 +37,18 @@ advance -- see the comments next to each one:
      local test container) and an outright failure wherever it isn't --
      reassigning ownership needs permission to SET ROLE to the target
      role, which an ordinary (non-superuser) connection on a managed
-     host doesn't have."""
+     host doesn't have.
+
+After loading, every table's row count is checked against the dump
+file itself (not a guessed number) -- "psql didn't error" was never
+proof the data actually landed correctly, and on one real run it
+didn't (see JOURNEY.md for the pooler bug that caused that). On a
+mismatch the target is scrubbed and the whole load retried from
+scratch, up to MAX_ATTEMPTS times, since the one realistic cause of a
+clean-looking run producing wrong counts is a transient hiccup
+(dropped connection mid-COPY, pooler weirdness) rather than something a
+retry can't fix. Pass --no-scrub to load into a database you know is
+already empty without wiping it first."""
 
 import argparse
 import re
@@ -47,6 +58,7 @@ from pathlib import Path
 
 SCHEMA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-schema.sql"
 DATA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-data.sql"
+MAX_ATTEMPTS = 5
 
 # Matches a pg_dump COPY header like:
 #   COPY public.actor (actor_id, first_name, last_name, last_update) FROM stdin;
@@ -206,7 +218,60 @@ def _run_psql(psql_path: str, connection_url: str, sql: str, description: str) -
         raise SystemExit(f"psql failed {description}:\n{result.stderr}")
 
 
-def load(psql_path: str, connection_url: str, cache_dir: Path) -> None:
+def _scrub(psql_path: str, connection_url: str) -> None:
+    """Wipes every object in the public schema before (re)loading --
+    Pagila's CREATE statements fail outright against a schema that
+    already has tables in it, including its own from a previous
+    attempt, so a retry needs a clean slate, not just a repeat."""
+    _run_psql(
+        psql_path,
+        connection_url,
+        "DROP SCHEMA public CASCADE;\nCREATE SCHEMA public;\n",
+        "scrubbing the public schema",
+    )
+
+
+def _expected_row_counts(patched_data_sql: str) -> dict[str, int]:
+    """Counts rows per table directly from the (already film_embedding-
+    and transaction_timeout-patched) data file's own COPY blocks -- the
+    actual ground truth, not a number anyone guessed or remembered."""
+    lines = patched_data_sql.splitlines()
+    counts: dict[str, int] = {}
+    i = 0
+    while i < len(lines):
+        match = _COPY_HEADER.match(lines[i])
+        if not match:
+            i += 1
+            continue
+        table = match.group(1)
+        i += 1
+        n = 0
+        while lines[i] != "\\.":
+            n += 1
+            i += 1
+        i += 1
+        counts[table] = n
+    return counts
+
+
+def _actual_row_counts(psql_path: str, connection_url: str, tables: list[str]) -> dict[str, int]:
+    query = "\nUNION ALL\n".join(f"SELECT '{t}' AS t, count(*) AS c FROM \"{t}\"" for t in tables)
+    result = subprocess.run(
+        [psql_path, connection_url, "-v", "ON_ERROR_STOP=1", "-At", "-F", "|", "-c", query],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"psql failed counting rows after loading:\n{result.stderr}")
+    counts: dict[str, int] = {}
+    for line in result.stdout.strip().splitlines():
+        table, _, count = line.partition("|")
+        counts[table] = int(count)
+    return counts
+
+
+def load(psql_path: str, connection_url: str, cache_dir: Path, scrub: bool = True) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     schema_file = cache_dir / "pagila-schema.sql"
     data_file = cache_dir / "pagila-data.sql"
@@ -226,8 +291,38 @@ def load(psql_path: str, connection_url: str, cache_dir: Path) -> None:
     # it back explicitly, as the session's last act, is what actually
     # matters here, not just leaving it to each caller to remember.
     combined_sql = patched_schema + "\n" + patched_data + "\nSET search_path TO public;\n"
+    expected_counts = _expected_row_counts(patched_data)
 
-    _run_psql(psql_path, connection_url, combined_sql, f"applying {schema_file} and {data_file}")
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        if scrub:
+            _scrub(psql_path, connection_url)
+        _run_psql(
+            psql_path,
+            connection_url,
+            combined_sql,
+            f"applying {schema_file} and {data_file} (attempt {attempt}/{MAX_ATTEMPTS})",
+        )
+
+        actual_counts = _actual_row_counts(psql_path, connection_url, list(expected_counts))
+        mismatches = [
+            f"  {table}: expected {expected}, got {actual_counts.get(table, -1)}"
+            for table, expected in expected_counts.items()
+            if actual_counts.get(table, -1) != expected
+        ]
+        if not mismatches:
+            print(
+                f"Row counts verified against the dump file: all {len(expected_counts)} tables match."
+            )
+            return
+
+        print(f"Attempt {attempt}/{MAX_ATTEMPTS}: row count mismatch after loading --")
+        print("\n".join(mismatches))
+        if attempt < MAX_ATTEMPTS:
+            print("Scrubbing and retrying..." if scrub else "Retrying...")
+
+    raise SystemExit(
+        f"Giving up after {MAX_ATTEMPTS} attempts -- row counts never matched the dump file."
+    )
 
 
 def main() -> None:
@@ -243,9 +338,14 @@ def main() -> None:
         default=".pagila-cache",
         help="Where the downloaded dump files are kept (reused on repeat runs).",
     )
+    parser.add_argument(
+        "--no-scrub",
+        action="store_true",
+        help="Don't wipe the public schema first -- only safe against a database you know is already empty.",
+    )
     args = parser.parse_args()
 
-    load(args.psql, args.connection_url, Path(args.cache_dir))
+    load(args.psql, args.connection_url, Path(args.cache_dir), scrub=not args.no_scrub)
     print("Pagila loaded.")
 
 
