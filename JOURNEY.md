@@ -814,3 +814,47 @@ nonexistent table correctly came back as an error, both carried
 correctly across the bridge. Cleaned up the throwaway workspace and
 database afterward.
 
+## 2026-10-19 — PgBouncer broke the bookkeeping engine on first real VPS use
+
+First attempt to point `APP_DATABASE_URL` at a real pgbouncer-fronted
+Postgres (reusing the Sumopod account that already hosts the Pagila
+target, for the VPS deploy) failed immediately, on literally the first
+query `app/db.py`'s engine ever runs (`select pg_catalog.version()`,
+part of SQLAlchemy's own connection setup):
+
+```
+asyncpg.exceptions.DuplicatePreparedStatementError: prepared statement
+"__asyncpg_stmt_1__" already exists
+HINT: pgbouncer with pool_mode set to "transaction" or "statement"
+does not support prepared statements properly... you can set
+statement_cache_size to 0 when creating the asyncpg connection object.
+```
+
+This had never shown up before because every prior real use of the
+Sumopod pgbouncer connection (`load_pagila_dataset.py`, the ad hoc
+verification queries throughout this project) either used `psql`
+directly or a single short-lived `asyncpg.connect()` call -- never
+`app/db.py`'s actual engine, which is `NullPool` (opens a genuinely
+new physical connection on every checkout, by design -- see its own
+comment) kept alive across a whole running process. Reproduced the
+exact failure directly, before trusting the asyncpg hint text alone: 5
+separate connection checkouts against the real Sumopod database, no
+fix, 4th one failed with the identical error; same 5 checkouts, with
+`connect_args={"statement_cache_size": 0}` added, all 5 succeeded.
+Root cause, concretely: PgBouncer's transaction/statement pooling
+routes different client connections to different backend server
+connections, asyncpg names its first prepared statement
+`__asyncpg_stmt_1__` on every connection it opens, and when PgBouncer
+happens to reuse the same backend for two different client
+connections, the second one collides with a prepared statement the
+backend still remembers from the first. Fixed in `app/db.py` by
+disabling asyncpg's prepared statement cache -- confirmed via the same
+reproduction that it's a real fix, not a guess at the hint text.
+
+This would have affected ANY deploy pointing `APP_DATABASE_URL` at a
+pgbouncer-fronted Postgres, not just this one -- the bug was latent in
+`app/db.py` since the very first commit, just never exercised until
+now because the bookkeeping database had only ever been plain,
+unpooled Postgres (local Docker, both on this machine and anywhere
+else this project has run) until this deploy attempt.
+
