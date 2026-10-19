@@ -22,7 +22,21 @@ from app.config import settings
 # tied to a different async "event loop" than the one currently running
 # (this bit a test run during development), which pooling would have
 # caused but NullPool avoids entirely.
-engine = create_async_engine(settings.database_url, poolclass=NullPool)
+#
+# statement_cache_size=0 disables asyncpg's own server-side prepared
+# statement cache -- necessary if APP_DATABASE_URL ever points through
+# PgBouncer in "transaction" or "statement" pooling mode (confirmed by
+# actually hitting it: a real deploy pointed this at a PgBouncer-fronted
+# Postgres and every query failed with "prepared statement ... already
+# exists", exactly the failure mode asyncpg's own error message
+# documents for this situation). Plain Postgres, no pooler in front,
+# works identically either way -- this isn't a tradeoff being made, it
+# just makes the one case that was actually broken work too.
+engine = create_async_engine(
+    settings.database_url,
+    poolclass=NullPool,
+    connect_args={"statement_cache_size": 0},
+)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
