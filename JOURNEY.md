@@ -858,3 +858,33 @@ now because the bookkeeping database had only ever been plain,
 unpooled Postgres (local Docker, both on this machine and anywhere
 else this project has run) until this deploy attempt.
 
+## 2026-10-19 (continued) — "421 Misdirected Request" on the first real external request
+
+With the PgBouncer fix deployed, the server on the VPS actually ran
+and `http://mcp.my.id:8000/healthz` worked from outside. The MCP
+endpoint itself didn't: every external request to `/mcp/` came back
+`421 Misdirected Request`, where a local request to the identical code
+on `127.0.0.1` worked fine.
+
+Root cause: `mcp.streamable_http_app()`'s own DNS-rebinding protection
+auto-enables whenever `host` isn't explicitly set, and defaults its
+`allowed_hosts` to `127.0.0.1`/`localhost`/`::1` only (confirmed
+directly in the SDK's own source,
+`mcp/server/lowlevel/server.py:streamable_http_app`). `app/main.py`
+never passed a `host=` or `transport_security=` of its own, so every
+request carrying `Host: mcp.my.id` -- which is every real external
+request once DNS actually points there -- got rejected by a security
+feature that was silently scoped to loopback-only and never told
+otherwise.
+
+Added `APP_MCP_ALLOWED_HOSTS` (`app/config.py`) and wired it into an
+explicit `TransportSecuritySettings` in `app/main.py`, so a real
+deployment can name its actual domain. Verified both directions
+directly, not just reasoned about: a request with `Host: mcp.my.id`
+and `APP_MCP_ALLOWED_HOSTS=mcp.my.id` set now gets the correct
+JSON-RPC "Missing session ID" response (what a real client actually
+expects); the same request with `APP_MCP_ALLOWED_HOSTS` unset still
+gets `421`, confirming the fix is opt-in and doesn't quietly weaken
+the default (loopback-only) protection for anyone who hasn't
+configured it.
+
