@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # means everyone gets logged out whenever the server restarts.
     # Set this explicitly for anything longer-lived.
     console_session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    # The MCP server's own DNS-rebinding protection only allows the Host
+    # header to be 127.0.0.1/localhost unless told otherwise -- real,
+    # not theoretical: a real deploy got every external request rejected
+    # with "421 Misdirected Request" until this was added. Comma-
+    # separated hostnames (no port, no scheme) this server is actually
+    # reachable at, e.g. "mcp.example.com" for a real deployment.
+    mcp_allowed_hosts: str = ""
 
     @field_validator("console_session_secret", mode="after")
     @classmethod

@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
@@ -31,7 +32,22 @@ from app.mcp.server import mcp
 # adds the "/mcp" prefix -- leaving this at its own default of "/mcp"
 # made the real path "/mcp/mcp" (confirmed by actually requesting it:
 # the first attempt 404'd).
-mcp_app = mcp.streamable_http_app(streamable_http_path="/")
+#
+# transport_security: the SDK's own DNS-rebinding protection only
+# allows the Host header to be 127.0.0.1/localhost by default -- a real
+# deploy hit this directly, every external request rejected with
+# "421 Misdirected Request" until APP_MCP_ALLOWED_HOSTS named the real
+# domain explicitly.
+_extra_hosts = [h.strip() for h in settings.mcp_allowed_hosts.split(",") if h.strip()]
+mcp_app = mcp.streamable_http_app(
+    streamable_http_path="/",
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        + [f"{host}:*" for host in _extra_hosts],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+        + [f"{scheme}://{host}:*" for host in _extra_hosts for scheme in ("http", "https")],
+    ),
+)
 
 
 @contextlib.asynccontextmanager
