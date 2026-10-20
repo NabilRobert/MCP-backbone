@@ -4,6 +4,7 @@ app's internal bookkeeping database -- see APP_DATABASE_URL in
 Everything else in app/ that reads or writes workspaces, API keys, the
 audit log, etc. goes through what's defined here."""
 
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import ClassVar
@@ -45,6 +46,9 @@ engine = create_async_engine(
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+_POSTGRES_SCHEME = re.compile(r"^postgresql(\+\w+)?://")
+
+
 def create_target_engine(connection_url: str) -> AsyncEngine:
     """Every place that connects to a workspace's real TARGET database
     (app/query/service.py, app/query/schema_cache.py -- never this
@@ -55,7 +59,20 @@ def create_target_engine(connection_url: str) -> AsyncEngine:
     assumed from the bookkeeping fix alone -- the real deployed target
     database hit the identical DuplicatePreparedStatementError once a
     real client actually called a tool against it. One helper here
-    instead of repeating connect_args in four separate call sites."""
+    instead of repeating connect_args in four separate call sites.
+
+    Also forces the +asyncpg driver regardless of what scheme a stored
+    connection_url actually has. This project has only ever tested
+    asyncpg; a bare "postgresql://" (no driver suffix at all -- exactly
+    what a workspace gets if its connection_url is copied straight from
+    APP_TARGET_DATABASE_URL without converting the scheme first, a real
+    mistake made more than once while setting this project up)
+    silently resolves to a DIFFERENT driver (psycopg) under this
+    SQLAlchemy version, which isn't even installed -- confirmed by
+    actually hitting ModuleNotFoundError: No module named 'psycopg' on
+    a real deployment's first real tool call, not a hypothetical."""
+    if _POSTGRES_SCHEME.match(connection_url):
+        connection_url = _POSTGRES_SCHEME.sub("postgresql+asyncpg://", connection_url, count=1)
     return create_async_engine(connection_url, connect_args={"statement_cache_size": 0})
 
 
