@@ -51,7 +51,14 @@ class ConsoleCredential(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
-    username: Mapped[str]
+    # unique=True because app/console/auth.py's login check uses
+    # scalar_one_or_none() on this column -- a real duplicate username
+    # (confirmed: two workspaces both seeded with "arthur") made that
+    # raise MultipleResultsFound instead of a clean "wrong password",
+    # crashing every login attempt for either workspace. Enforced at
+    # the database level so this can't recur no matter which script
+    # creates a ConsoleCredential.
+    username: Mapped[str] = mapped_column(unique=True)
     password_hash: Mapped[str]
 
 
