@@ -38,9 +38,8 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 34 passing tests against a real Postgres instance, CI running
-on every push. Not yet deployed to the VPS -- Arthur deploys by pulling
-from this repo.
+the model. 67 passing tests against a real Postgres instance, CI
+running on every push.
 
 **The MCP server can now actually be reached over a network** --
 mounted at `/mcp` on the same FastAPI app as the console (one process,
@@ -55,6 +54,23 @@ using a real HTTP header and no `api_key` argument at all, and a real
 four real bugs (wrong lifespan, a double-mounted path, DNS-rebinding
 protection, an unrelated stray process squatting the first port tried)
 each found only by actually running it.
+
+**Deployed and live on a real VPS, behind a real domain** -- a real
+Claude Code session, running on a laptop, successfully calling this
+server's tools over the open internet against the real Pagila
+database. Runs under a systemd unit (`mcp-backbone`), not a manually
+tracked background process. Getting there surfaced a genuine security
+issue worth being upfront about, not just a bug: the bookkeeping
+database and the target database were briefly the same database on
+first deploy, meaning an AI client could in principle have read API
+key hashes and the full audit log through `run_query`. Caught and
+fixed the same day, before anyone but the one real workspace ever used
+it -- bookkeeping now lives on a separate, local Postgres instance on
+the VPS itself. Full account in JOURNEY.md, including the two more
+real bugs (a target connection URL silently resolving to an
+uninstalled database driver; a duplicate console username crashing
+every login attempt) found getting the first real tool call to
+actually succeed.
 
 **Slice E (benchmark) now run for real -- 10/10 (100%)**:
 `scripts/run_benchmark.py` runs a PydanticAI agent (`gpt-5-mini` via

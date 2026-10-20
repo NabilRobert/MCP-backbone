@@ -931,3 +931,84 @@ explained the whole discrepancy. Discarded the divergent reimplementation
 and pulled the real one instead of ending up with two different fixes
 for the same bug in two places.
 
+## 2026-10-20 (continued) — Bookkeeping and target were the same database
+
+Fixing the target-side PgBouncer bug above surfaced something the
+error message itself didn't mention, buried in an aside about the
+`list_tables` output: the fixed call returned the real Pagila tables
+*and* this project's own bookkeeping tables (`workspaces`, `api_keys`,
+`query_executions`, ...) side by side. `APP_DATABASE_URL` and
+`APP_TARGET_DATABASE_URL` on the VPS had been pointing at the exact
+same Sumopod database the whole time -- the "create a new database for
+bookkeeping" step from the original deploy walkthrough never actually
+happened there.
+
+This is exactly the failure THREAT_MODEL.md's separation between
+these two databases exists to prevent: any AI client calling
+`run_query` could read API key hashes, console password hashes, and
+the complete audit log of every query anyone has ever run through this
+server, through the very tool meant to be sandboxed to Pagila alone.
+Not a theoretical gap -- confirmed directly, the bookkeeping tables
+were right there in a real `list_tables` response.
+
+Fixing it took a real pivot partway through: the planned fix (create a
+second database on the same Sumopod account) failed -- that hosting
+role has no `CREATEDB` privilege, confirmed directly rather than
+assumed. Installed a local Postgres 16 on the VPS instead, which is
+arguably the better architecture anyway (the app's own bookkeeping
+data living on the machine it actually runs on, not a second database
+on the same remote shared host as the data it's protecting against).
+Migrated the real data across with `pg_dump --data-only` (table list
+caught two gaps on review before running it -- `eval_cases` and
+`benchmark_results` were missing from both the copy and the planned
+`DROP TABLE` list, which would have left the drop looking "incomplete"
+afterward even though the real security-sensitive tables were handled
+correctly) rather than discarding and reseeding, so the already-
+configured API key kept working with zero reconfiguration needed.
+Verified `list_tables` against the live server afterward -- Pagila
+only, 70 tables, nothing from the bookkeeping schema -- before dropping
+the bookkeeping tables from the shared database, not before.
+
+Two more real things found and fixed in the same pass, neither of them
+guessed at:
+
+- **A genuinely duplicate workspace.** Re-running `seed_workspace.py`
+  with the same `--name` (not idempotent -- see the Slice E section
+  much earlier in this file for the first time that bit) had created a
+  second "vps-deployment" workspace, both with console username
+  "arthur". `verify_console_login()`'s `scalar_one_or_none()` doesn't
+  tolerate more than one match -- it was raising `MultipleResultsFound`
+  on every single console login attempt, for either workspace, not
+  returning a clean wrong-password response. Fixed two ways: deleted
+  the stale duplicate (unused, still had the broken bare-scheme
+  connection URL, zero real queries against it), and added a real
+  database-level unique constraint on `console_credentials.username`
+  (migration `1dc23f88f669`) so this specific failure mode can't come
+  back regardless of which script creates a credential row next time.
+  Verified the constraint actually rejects a real duplicate insert, not
+  just that the migration applies cleanly.
+- **The "stale process" confusion from earlier today, actually
+  explained.** Every restart today used `nohup uv run uvicorn ... &`,
+  the same pattern that kept appearing to leave old processes running
+  even after a `kill`. Root cause: a process can close its listening
+  port on SIGTERM while still not actually exiting, if it's stuck
+  waiting on something long-lived (here, probably an open SSE
+  connection) -- `ss -tlnp` would show the port as free while the old
+  process was still technically alive. Fixed properly, not by trying
+  to out-guess that race by hand again: the server now runs under a
+  real systemd unit (`mcp-backbone`, `Restart=on-failure`, enabled at
+  boot), so a restart means `systemctl restart mcp-backbone`, not a
+  manually-tracked PID and a background shell job.
+
+Also set up: forced `+asyncpg` for any target connection URL
+(`create_target_engine`, app/db.py), closing off the bare-scheme bug
+at the source instead of only at the one data row that happened to hit
+it (new tests: `tests/test_db.py`); a nightly `pg_dump` backup of the
+new bookkeeping database (cron, 14 dumps kept); `.env.bak-*` added to
+`.gitignore` (a real backup file this exact migration created, holding
+real credentials, must never be committed).
+
+Open gap, not addressed yet: no off-server copy of the bookkeeping
+backups exists -- if the VPS itself is lost, the local `~/backups/`
+directory goes with it.
+

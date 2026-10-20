@@ -96,7 +96,17 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
 - **`app/db.py`** — sets up the one shared database connection pool and
   the base class every table model inherits from. Also where the
   "always store timestamps with timezone info" rule is enforced
-  globally, so nobody has to remember it per-column.
+  globally, so nobody has to remember it per-column. `create_target_engine()`
+  here is the one place every connection to a workspace's *target*
+  database goes through — both the PgBouncer prepared-statement fix and
+  forcing the `+asyncpg` driver live here precisely so every call site
+  gets them automatically, instead of needing each one to remember.
+  Real production deployment (the VPS) keeps the bookkeeping database
+  this file connects to (`APP_DATABASE_URL`) on a completely separate
+  Postgres instance from any target database an AI client can actually
+  query — deliberately, not incidentally, see THREAT_MODEL.md and
+  JOURNEY.md for a real incident where those two databases ended up
+  being the same one.
 - **`app/config.py`** — reads all the `APP_*` settings (timeouts, rate
   limit, which databases to use) from environment variables into one
   typed object the rest of the code uses.
@@ -189,3 +199,6 @@ fixing it. `README.md` is the front door to all of that.
   JOURNEY.md for why, and for a real session-state leak this same
   target host's connection pooler caused and how the loader now avoids
   it.
+- The VPS deployment's bookkeeping backups (`~/backups/` on the VPS,
+  nightly via cron) have no off-server copy. If the VPS itself is
+  lost, those go with it.
