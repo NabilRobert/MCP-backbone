@@ -888,3 +888,46 @@ gets `421`, confirming the fix is opt-in and doesn't quietly weaken
 the default (loopback-only) protection for anyone who hasn't
 configured it.
 
+## 2026-10-20 — The PgBouncer bug was never just in app/db.py
+
+First real tool call through the fully-deployed server (both earlier
+fixes live, Claude Code genuinely connected over the real domain) --
+`list_tables` failed with a generic, detail-free "Error executing tool
+list_tables". Reproduced it directly rather than guess from the vague
+message: same error, calling the tool the exact same way Claude Code
+does (header auth, real deployed URL).
+
+The PgBouncer fix from two days ago (`a0a0193`) only touched
+`app/db.py`'s *bookkeeping* engine -- but `app/query/service.py` and
+`app/query/schema_cache.py` each independently call
+`create_async_engine(data_source.connection_url)` to reach the
+*target* database, with no `connect_args` at all, four call sites
+total. The target database is the exact same PgBouncer-fronted Sumopod
+account as the one that broke the bookkeeping engine -- so the
+identical `DuplicatePreparedStatementError` was always latent here
+too, just never exercised by a real tool call against the real target
+until today. (It also explains why nothing caught this earlier:
+`test_mcp_protocol.py`'s in-memory test and `run_benchmark.py` both
+run against a plain local Postgres, never a PgBouncer-fronted one.)
+
+Fixed once, centrally, instead of patching four call sites with the
+same `connect_args` literal: added `create_target_engine()` to
+`app/db.py`, and pointed all four at it. Verified with the same
+reproduction technique as the original bug -- 5 separate connection
+checkouts against the real target database, all succeeding -- not just
+assumed that mirroring the earlier fix would obviously work.
+
+Side note from diagnosing this with help from another session running
+directly on the VPS: it initially concluded the *other* fix
+(`APP_MCP_ALLOWED_HOSTS`, from earlier the same day) was "dead
+configuration that nothing read" and rewrote it independently. The
+real explanation was simpler -- that VPS checkout was 5 commits behind
+`origin/main`, sitting on code from before that fix existed at all.
+Caught before it was committed, by asking for the actual `git diff`
+instead of accepting a plausible-sounding root-cause story at face
+value -- the diff immediately showed a field type (`list[str]`) that
+didn't match what was actually pushed, and the commit-distance gap
+explained the whole discrepancy. Discarded the divergent reimplementation
+and pulled the real one instead of ending up with two different fixes
+for the same bug in two places.
+
