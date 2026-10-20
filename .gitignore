@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+.env.bak-*
 .pytest_cache/
 .ruff_cache/
 node_modules/
