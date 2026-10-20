@@ -9,7 +9,12 @@ from datetime import datetime
 from typing import ClassVar
 
 from sqlalchemy import DateTime
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
@@ -38,6 +43,20 @@ engine = create_async_engine(
     connect_args={"statement_cache_size": 0},
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def create_target_engine(connection_url: str) -> AsyncEngine:
+    """Every place that connects to a workspace's real TARGET database
+    (app/query/service.py, app/query/schema_cache.py -- never this
+    project's own bookkeeping one, that's the module-level `engine`
+    above) needs the exact same statement_cache_size=0 fix, for the
+    exact same reason: a target is just as likely to be PgBouncer-
+    fronted as the bookkeeping database was. Confirmed directly, not
+    assumed from the bookkeeping fix alone -- the real deployed target
+    database hit the identical DuplicatePreparedStatementError once a
+    real client actually called a tool against it. One helper here
+    instead of repeating connect_args in four separate call sites."""
+    return create_async_engine(connection_url, connect_args={"statement_cache_size": 0})
 
 
 class Base(DeclarativeBase):

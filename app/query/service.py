@@ -11,11 +11,12 @@ from typing import Any
 import asyncpg  # pyright: ignore[reportMissingTypeStubs] -- asyncpg ships no stubs
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import Inspector
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, check_and_increment
 from app.config import settings
+from app.db import create_target_engine
 from app.query.cost_check import check_cost
 from app.query.models import DataSourceConnection, QueryExecution
 from app.query.validation import QueryRejected, validate_and_normalize
@@ -42,7 +43,6 @@ class QueryExecutionError(Exception):
     """Raised for problems that aren't about SQL safety (that's
     QueryRejected, in validation.py) -- things like "this workspace
     isn't even set up to query anything yet.\""""
-
 
 
 def _asyncpg_cause(exc: BaseException) -> BaseException | None:
@@ -102,7 +102,7 @@ async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
     """Connects to the workspace's real database just long enough to ask
     "what tables exist here?" and returns their names."""
     data_source = await get_data_source(session, workspace)
-    engine = create_async_engine(data_source.connection_url)
+    engine = create_target_engine(data_source.connection_url)
     try:
         async with engine.connect() as conn:
 
@@ -150,7 +150,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     cost: float | None = None
     rows: list[dict[str, Any]] = []
 
-    engine = create_async_engine(data_source.connection_url)
+    engine = create_target_engine(data_source.connection_url)
     try:
         async with engine.connect() as conn:
             # Step 3: how expensive would this query be? (see
@@ -161,7 +161,9 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
                     conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
                 )
             except QueryRejected as exc:
-                await _write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
+                await _write_audit(
+                    session, workspace, data_source, sql, "rejected", None, exc.reason
+                )
                 return {"status": "rejected", "rows": [], "error": exc.reason}
             except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
                 await _write_audit(session, workspace, data_source, sql, "errored", None, str(exc))

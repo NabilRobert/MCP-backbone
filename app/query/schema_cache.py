@@ -10,9 +10,10 @@ from typing import Any
 
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import Inspector
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
+from app.db import create_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
 from app.query.service import QueryExecutionError, get_data_source
 
@@ -25,7 +26,7 @@ async def _fetch_live(connection_url: str) -> dict[str, list[dict[str, str]]]:
     """Connects to the real database and asks it directly: what tables
     exist, and what columns (name + type) does each one have? Returns
     something like {"customers": [{"name": "id", "type": "INTEGER"}, ...]}."""
-    engine = create_async_engine(connection_url)
+    engine = create_target_engine(connection_url)
     try:
         async with engine.connect() as conn:
 
@@ -75,9 +76,7 @@ async def get_table_metadata(
     metadata_json = json.dumps(metadata)
     if cache is None:
         session.add(
-            SchemaCache(
-                workspace_id=workspace.id, table_metadata_json=metadata_json, cached_at=now
-            )
+            SchemaCache(workspace_id=workspace.id, table_metadata_json=metadata_json, cached_at=now)
         )
     else:
         cache.table_metadata_json = metadata_json
@@ -121,7 +120,7 @@ async def sample_rows(
     # only thing keeping this safe.
     quoted_name = table_name.replace('"', '""')
 
-    engine = create_async_engine(data_source.connection_url)
+    engine = create_target_engine(data_source.connection_url)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(
