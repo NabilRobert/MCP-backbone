@@ -143,11 +143,16 @@ for local development only (single process, restarts on every file
 change); a real deployment needs a proper process manager and should
 drop that flag.
 
-The console's TypeScript is compiled separately:
+The console's compiled JavaScript (`app/console/static/main.js`) is
+committed, so running or deploying the server needs no Node at all.
+Only if you edit `static-src/main.ts`, rebuild and commit both files:
 
 ```
-cd static-src && npm install && npm run build
+cd static-src && npm ci && npm run build
 ```
+
+CI rebuilds it on every push and fails if the committed copy doesn't
+match, so the two can't drift apart.
 
 ## Running tests: the `APP_DATABASE_URL` privilege requirement
 

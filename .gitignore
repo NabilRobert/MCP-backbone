@@ -6,7 +6,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 node_modules/
-app/console/static/*.js
 app/console/static/*.js.map
 .DS_Store
 # phase-*.md

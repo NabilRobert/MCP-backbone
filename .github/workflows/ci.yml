@@ -56,3 +56,31 @@ jobs:
 
       - name: Test (pytest)
         run: .venv/bin/pytest tests/ -v
+
+  console:
+    # The console's compiled JS is committed (the server has no Node), so
+    # this checks the committed copy is exactly what its TypeScript builds to.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: static-src
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install build tools
+        run: npm ci
+
+      - name: Type check (tsc)
+        run: npx tsc --noEmit -p .
+
+      - name: Committed main.js matches a fresh build
+        run: |
+          npm run build
+          git diff --exit-code -- ../app/console/static/main.js || {
+            echo "::error::app/console/static/main.js is out of date. Run 'npm run build' in static-src and commit the result."
+            exit 1
+          }

@@ -1126,3 +1126,22 @@ refused, real `list_tables`/`run_query` calls over HTTPS with the live
 key, and Claude Code re-pointed to `https://mcp.my.id:8443/mcp` and
 connected.
 
+
+## 2026-10-21 (continued) — The deployed console had no JavaScript
+
+Checked the deployed web console for the first time: the login page
+loaded, but `/console/static/main.js`, which the dashboard needs for its
+live audit-log feed, returned 404. The compiled TypeScript was
+gitignored and the VPS has no Node, so nothing had ever built it there.
+This was flagged as a deploy risk early on, and had never been tested
+until now.
+
+Fixed by committing the compiled file instead of building it on the
+server: it's one small esbuild bundle, and committing it means a plain
+`git pull` deploys it with no extra toolchain. Before relying on that,
+confirmed the build is deterministic (two clean `npm ci` builds were
+byte-identical) and that the lockfile includes esbuild's Linux binary,
+which CI needs. A new CI job typechecks the TypeScript, rebuilds it, and
+fails if the committed `main.js` differs. That check was tested both
+ways locally: it passes on matching source, and catches a deliberately
+edited `main.ts` with a stale `main.js`.
