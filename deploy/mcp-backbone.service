@@ -1,12 +1,18 @@
 # /etc/systemd/system/mcp-backbone.service on the VPS.
 # Install: sudo cp deploy/mcp-backbone.service /etc/systemd/system/
-#          sudo systemctl daemon-reload && sudo systemctl enable --now mcp-backbone
+#          sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
 # Secrets: none here. The app reads .env from WorkingDirectory.
 #
-# --host 0.0.0.0 is deliberate for now: there is no reverse proxy in front
-# of this app, and clients connect directly to port 8000. That also means
-# there is no TLS yet (see ARCHITECTURE.md's open gaps). Once a TLS proxy
-# sits in front, change this to 127.0.0.1 so port 8000 isn't public.
+# uvicorn terminates TLS itself on 8443 (no proxy in front; ports 80/443 on
+# this VPS belong to an unrelated site). The cert comes from Let's Encrypt
+# via a Cloudflare DNS-01 challenge. certbot renews it, and
+# deploy/certbot-deploy-hook.sh copies it to /etc/mcp-backbone/tls/ (this
+# service runs as ubuntu, which can't read /etc/letsencrypt/live) and
+# restarts the service.
+#
+# --timeout-graceful-shutdown 5: without it, a restart hangs until systemd's
+# 90s stop timeout, because uvicorn waits for open MCP streaming connections
+# (e.g. a connected Claude Code) to close on their own.
 [Unit]
 Description=Database MCP server (FastAPI + uvicorn)
 After=network-online.target postgresql.service
@@ -15,7 +21,7 @@ Wants=network-online.target postgresql.service
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/MCP-backbone
-ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-certfile /etc/mcp-backbone/tls/fullchain.pem --ssl-keyfile /etc/mcp-backbone/tls/privkey.pem --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=3
 

@@ -1075,3 +1075,54 @@ Small operational note: `age` refuses an identity file containing
 anything besides comments and the key, so the key file should hold the
 key and nothing else, not other credentials alongside it.
 
+## 2026-10-21 (continued) — HTTPS
+
+Until today the deployed server ran over plain HTTP, so the bearer API
+key crossed the internet unencrypted. The obstacle to fixing it:
+Let's Encrypt normally proves domain ownership over port 80 or 443, and
+on this VPS both belong to an unrelated site's Caddy container. Four
+options were weighed: renewing a manual DNS-01 cert by hand every ~60
+days, routing through that other site's Caddy (breaking the separation
+chosen earlier), moving onto a private network (ruling out anyone else
+ever connecting), or moving the domain's DNS to Cloudflare. Cloudflare
+won: its DNS API lets certbot pass a DNS-01 challenge and renew itself
+forever, with no manual steps and nothing shared with the other site.
+
+What actually happened, mistakes included:
+
+- **The moved DNS record defaulted to "Proxied".** As soon as the
+  nameservers switched, `mcp.my.id` resolved to Cloudflare's own IPs,
+  whose proxy doesn't forward port 8000, so the live server became
+  unreachable through its domain while working fine by IP. Caught by
+  checking Cloudflare's authoritative nameserver directly rather than
+  trusting a cache; fixed by setting the record to "DNS only". It needs
+  to stay that way: a proxied record would let Cloudflare read the
+  bearer key and would cut long-lived MCP connections.
+- **No proxy in front at all.** uvicorn terminates TLS itself on port
+  8443. The cert lives in `/etc/letsencrypt/live`, which the service
+  (running as `ubuntu`) can't read, so a certbot deploy hook copies it
+  to `/etc/mcp-backbone/tls/` and restarts the service on each
+  renewal (`deploy/certbot-deploy-hook.sh`).
+- **ufw was a red herring.** The plan included "open 8443 in ufw";
+  checking first showed ufw was inactive all along. The firewall that
+  matters is the cloud provider's security group, and an outside probe
+  (instant "connection refused" on 8443 rather than a timeout) showed
+  it already allows the port. It also showed that security group is
+  wide open, now recorded as an open gap.
+- **A copy-pasted `!` silently skipped the restart.** The unit edit
+  went in, but the reload/restart never ran: the command had been
+  pasted with a leading `! ` (Claude Code's shell-escape prefix), which
+  in plain bash negates the exit status, so `&&` skipped everything
+  after it. Found by reading the VPS's sudo log and shell history, not
+  by guessing.
+- **Restarts hung for 90 seconds.** uvicorn waits for open MCP
+  streaming connections to close before stopping; systemd only kills
+  it at its 90s timeout. `--timeout-graceful-shutdown 5` added to the
+  unit in the repo.
+
+Verified from outside, not just from the server: a publicly trusted
+Let's Encrypt cert for `mcp.my.id`, port 8000 closed, plain HTTP to 8443
+refused, real `list_tables`/`run_query` calls over HTTPS with the live
+key, and Claude Code re-pointed to `https://mcp.my.id:8443/mcp` and
+connected.
+

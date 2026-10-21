@@ -166,8 +166,12 @@ setting things up:
   keeping the last 14 locally and remotely. Reads every secret from
   `.env` at run time, so this file contains none.
 - **`mcp-backbone.service`** — the systemd unit that runs the server
-  (restarts on failure, starts at boot). Install instructions are in
-  its header.
+  (restarts on failure, starts at boot). uvicorn serves HTTPS itself
+  on port 8443, so clients connect to `https://mcp.my.id:8443/mcp`.
+  Install instructions are in its header.
+- **`certbot-deploy-hook.sh`** — runs after each automatic certificate
+  renewal: copies the new cert to where the service can read it, then
+  restarts the service.
 - **`crontab`** — the one cron line that runs the nightly backup.
 
 ## `tests/` mirrors `app/`
@@ -211,11 +215,13 @@ fixing it. `README.md` is the front door to all of that.
   JOURNEY.md for why, and for a real session-state leak this same
   target host's connection pooler caused and how the loader now avoids
   it.
-- **The deployed server has no TLS.** Clients connect over plain HTTP
-  to `http://mcp.my.id:8000/mcp`, so the `Authorization: Bearer` API
-  key travels unencrypted. It was a deliberate interim step to get a
-  first working deploy, not an oversight. Ports 80/443 on that VPS
-  belong to an unrelated site's Caddy, so the realistic fix is a
-  certificate for `mcp.my.id` via a manual DNS-01 challenge, served
-  by a proxy on another port. Once that's in place, uvicorn should bind
-  to `127.0.0.1` instead of `0.0.0.0` (see `deploy/mcp-backbone.service`).
+- The VPS's cloud firewall (the provider's security group) appears
+  wide open: ports 8000 and 8443 were both reachable without any rule
+  being added. Nothing sensitive listens publicly today (the local
+  Postgres binds to `127.0.0.1` only), but any future service bound to
+  `0.0.0.0` on that machine would be exposed. Worth restricting it in
+  the provider console to 22, 80/443 (the other site) and 8443.
+- The web console's session cookie isn't marked `https_only` yet. Now
+  that the deployed server is HTTPS-only this could be turned on, but
+  it would need to stay off for local development over plain HTTP, so
+  it wants a setting rather than a hardcoded flag.

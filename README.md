@@ -58,8 +58,11 @@ each found only by actually running it.
 **Deployed and live on a real VPS, behind a real domain** -- a real
 Claude Code session, running on a laptop, successfully calling this
 server's tools over the open internet against the real Pagila
-database. Runs under a systemd unit (`mcp-backbone`), not a manually
-tracked background process. Getting there surfaced a genuine security
+database, over HTTPS (`https://mcp.my.id:8443/mcp`, a Let's Encrypt
+certificate that renews itself). Runs under a systemd unit
+(`mcp-backbone`), not a manually tracked background process; the unit,
+cert-renewal hook, backup script and cron line all live in `deploy/`
+so the server can be rebuilt from git. Getting there surfaced a genuine security
 issue worth being upfront about, not just a bug: the bookkeeping
 database and the target database were briefly the same database on
 first deploy, meaning an AI client could in principle have read API
