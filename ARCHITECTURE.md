@@ -199,6 +199,7 @@ fixing it. `README.md` is the front door to all of that.
   JOURNEY.md for why, and for a real session-state leak this same
   target host's connection pooler caused and how the loader now avoids
   it.
-- The VPS deployment's bookkeeping backups (`~/backups/` on the VPS,
-  nightly via cron) have no off-server copy. If the VPS itself is
-  lost, those go with it.
+- The VPS deployment's bookkeeping backups are now copied off-server
+  nightly (age-encrypted, to S3), but no restore from one of those
+  copies has been tested yet. Until one has, it's unproven that they
+  can actually be decrypted and restored.

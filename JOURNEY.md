@@ -1012,3 +1012,37 @@ Open gap, not addressed yet: no off-server copy of the bookkeeping
 backups exists -- if the VPS itself is lost, the local `~/backups/`
 directory goes with it.
 
+## 2026-10-21 — Off-server backups for the bookkeeping database
+
+Closed that gap. The nightly backup script on the VPS now encrypts each
+dump with `age` (to a public key; the matching private key is kept only
+off the VPS, so a lost VPS can't take the means of decrypting with it)
+and uploads it to an S3 bucket. It keeps the last 14 locally and the
+last 14 in S3.
+
+The first draft of the script (written for Backblaze B2, before
+switching to S3) was blocked by the VPS session's safety check as a
+"mass delete" risk. That was a real bug, not a false alarm: its remote
+cleanup listed *every* file in the bucket and deleted all but the
+newest 14, so anything else stored there, or a typo pointing at a
+different bucket, would have been wiped. Fixed by matching only this
+script's own filename pattern under its own `bookkeeping/` prefix, and
+deleting one named file at a time. The same review caught two smaller
+issues worth keeping: credentials passed inline in the rclone remote
+string were readable by any user via `ps` (moved to exported
+`RCLONE_S3_*` env vars), and a missing `.env` value would only have
+failed partway through (now checked up front, before dumping
+anything).
+
+Getting the first upload through took two more real fixes, each found
+from the actual AWS error, not guessed: a 41-character secret key
+(AWS secrets are exactly 40; one extra character from the paste)
+causing `SignatureDoesNotMatch`, and an IAM policy missing
+`s3:ListBucket` on the bucket ARN itself (separate from the object
+ARN). Verified by listing the bucket afterward: the encrypted dump was
+there, same size as the local copy.
+
+Still open: no test restore yet. Until someone decrypts one of these
+with the off-VPS private key and runs `pg_restore --list` on it, it's
+unproven that the backups can actually be restored.
+
