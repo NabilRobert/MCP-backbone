@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # means everyone gets logged out whenever the server restarts.
     # Set this explicitly for anything longer-lived.
     console_session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    # Marks the console's session cookie Secure, so a browser only ever
+    # sends it over HTTPS. Turn on for any real deployment; it has to
+    # stay off for local development over plain http://, or the browser
+    # drops the cookie and login silently never sticks.
+    console_cookie_https_only: bool = False
     # The MCP server's own DNS-rebinding protection only allows the Host
     # header to be 127.0.0.1/localhost unless told otherwise -- real,
     # not theoretical: a real deploy got every external request rejected

@@ -65,9 +65,13 @@ app = FastAPI(title="Database MCP Console", lifespan=lifespan)
 # since every form here is a same-origin POST. Harmless for MCP
 # requests under /mcp: this middleware only ever ADDS a `request.session`
 # capability, it never requires or rejects anything for a request that
-# doesn't use it.
+# doesn't use it. https_only comes from settings (see app/config.py):
+# on for the HTTPS deployment, off for local plain-HTTP development.
 app.add_middleware(
-    SessionMiddleware, secret_key=settings.console_session_secret, same_site="strict"
+    SessionMiddleware,
+    secret_key=settings.console_session_secret,
+    same_site="strict",
+    https_only=settings.console_cookie_https_only,
 )
 
 app.include_router(console_router)

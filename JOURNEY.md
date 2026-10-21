@@ -1145,3 +1145,14 @@ which CI needs. A new CI job typechecks the TypeScript, rebuilds it, and
 fails if the committed `main.js` differs. That check was tested both
 ways locally: it passes on matching source, and catches a deliberately
 edited `main.ts` with a stale `main.js`.
+
+## 2026-10-21 (continued) — Secure console cookie
+
+The console's session cookie is now marked Secure on the deployment,
+via a new `APP_CONSOLE_COOKIE_HTTPS_ONLY` setting (default off). It has
+to be a setting, not hardcoded, because a Secure cookie is never sent
+back over plain `http://`: turned on locally, login "succeeds" and the
+very next page bounces back to the login screen. One new test pins
+exactly that behavior (session survives over https, not over http), so
+that requirement is documented by the tests, not just here. Another
+checks the flag appears on the cookie only when the setting is on.

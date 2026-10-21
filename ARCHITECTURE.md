@@ -221,7 +221,3 @@ fixing it. `README.md` is the front door to all of that.
   Postgres binds to `127.0.0.1` only), but any future service bound to
   `0.0.0.0` on that machine would be exposed. Worth restricting it in
   the provider console to 22, 80/443 (the other site) and 8443.
-- The web console's session cookie isn't marked `https_only` yet. Now
-  that the deployed server is HTTPS-only this could be turned on, but
-  it would need to stay off for local development over plain HTTP, so
-  it wants a setting rather than a hardcoded flag.

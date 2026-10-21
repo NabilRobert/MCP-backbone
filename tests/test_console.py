@@ -5,12 +5,24 @@ the audit JSON API the dashboard polls."""
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth.models import Workspace
 from app.main import app
 from app.query.service import run_query
 
 pytestmark = pytest.mark.asyncio
+
+
+def _set_cookie_https_only(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
+    """Flips the session middleware's https_only for one test. The
+    middleware's settings are fixed when app.main is imported, so this
+    edits its registered kwargs and clears the cached middleware stack
+    so Starlette rebuilds it on the next request; monkeypatch restores
+    both afterwards."""
+    middleware = next(m for m in app.user_middleware if m.cls is SessionMiddleware)
+    monkeypatch.setitem(middleware.kwargs, "https_only", value)
+    monkeypatch.setattr(app, "middleware_stack", None)
 
 
 async def test_protected_routes_redirect_when_not_logged_in(
@@ -65,6 +77,43 @@ async def test_full_login_session_and_logout(
     after_logout = client.get("/console/")
     assert after_logout.status_code == 303
     assert after_logout.headers["location"] == "/console/login"
+
+
+async def test_session_cookie_secure_flag_follows_setting(
+    db_session: AsyncSession,
+    seeded_workspace: tuple[Workspace, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credentials = {"username": "admin", "password": "testpass"}
+
+    _set_cookie_https_only(monkeypatch, False)
+    plain = TestClient(app, follow_redirects=False).post("/console/login", data=credentials)
+    assert "secure" not in plain.headers["set-cookie"].lower()
+
+    _set_cookie_https_only(monkeypatch, True)
+    login = TestClient(app, follow_redirects=False).post("/console/login", data=credentials)
+    assert "secure" in login.headers["set-cookie"].lower()
+
+
+async def test_https_only_cookie_keeps_session_over_https_but_not_http(
+    db_session: AsyncSession,
+    seeded_workspace: tuple[Workspace, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Why the setting has to stay off for local plain-HTTP development:
+    # with it on, the client never sends the cookie back over http://.
+    _set_cookie_https_only(monkeypatch, True)
+    credentials = {"username": "admin", "password": "testpass"}
+
+    https_client = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    assert https_client.post("/console/login", data=credentials).status_code == 303
+    assert https_client.get("/console/").status_code == 200
+
+    http_client = TestClient(app, base_url="http://testserver", follow_redirects=False)
+    assert http_client.post("/console/login", data=credentials).status_code == 303
+    dashboard = http_client.get("/console/")
+    assert dashboard.status_code == 303
+    assert dashboard.headers["location"] == "/console/login"
 
 
 async def test_audit_api_returns_real_rows(
