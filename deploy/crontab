@@ -1,0 +1,4 @@
+# The VPS's crontab for user ubuntu (install with: crontab deploy/crontab).
+# Note: this replaces the whole crontab, so merge by hand if it has other lines.
+# Expects deploy/backup_bookkeeping.sh installed at ~/bin/backup_bookkeeping.sh.
+17 3 * * * $HOME/bin/backup_bookkeeping.sh >> $HOME/backups/backup.log 2>&1

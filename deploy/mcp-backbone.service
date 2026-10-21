@@ -1,0 +1,23 @@
+# /etc/systemd/system/mcp-backbone.service on the VPS.
+# Install: sudo cp deploy/mcp-backbone.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now mcp-backbone
+# Secrets: none here. The app reads .env from WorkingDirectory.
+#
+# --host 0.0.0.0 is deliberate for now: there is no reverse proxy in front
+# of this app, and clients connect directly to port 8000. That also means
+# there is no TLS yet (see ARCHITECTURE.md's open gaps). Once a TLS proxy
+# sits in front, change this to 127.0.0.1 so port 8000 isn't public.
+[Unit]
+Description=Database MCP server (FastAPI + uvicorn)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/MCP-backbone
+ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

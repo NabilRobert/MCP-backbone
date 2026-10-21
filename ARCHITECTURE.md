@@ -165,6 +165,10 @@ setting things up:
   bookkeeping database, encrypts it with `age`, and uploads it to S3,
   keeping the last 14 locally and remotely. Reads every secret from
   `.env` at run time, so this file contains none.
+- **`mcp-backbone.service`** — the systemd unit that runs the server
+  (restarts on failure, starts at boot). Install instructions are in
+  its header.
+- **`crontab`** — the one cron line that runs the nightly backup.
 
 ## `tests/` mirrors `app/`
 
@@ -207,6 +211,14 @@ fixing it. `README.md` is the front door to all of that.
   JOURNEY.md for why, and for a real session-state leak this same
   target host's connection pooler caused and how the loader now avoids
   it.
+- **The deployed server has no TLS.** Clients connect over plain HTTP
+  to `http://mcp.my.id:8000/mcp`, so the `Authorization: Bearer` API
+  key travels unencrypted. It was a deliberate interim step to get a
+  first working deploy, not an oversight. Ports 80/443 on that VPS
+  belong to an unrelated site's Caddy, so the realistic fix is a
+  certificate for `mcp.my.id` via a manual DNS-01 challenge, served
+  by a proxy on another port. Once that's in place, uvicorn should bind
+  to `127.0.0.1` instead of `0.0.0.0` (see `deploy/mcp-backbone.service`).
 - The VPS deployment's bookkeeping backups are now copied off-server
   nightly (age-encrypted, to S3), but no restore from one of those
   copies has been tested yet. Until one has, it's unproven that they
