@@ -1046,3 +1046,32 @@ Still open: no test restore yet. Until someone decrypts one of these
 with the off-VPS private key and runs `pg_restore --list` on it, it's
 unproven that the backups can actually be restored.
 
+## 2026-10-21 (continued) — Test restore passed, and found an unapplied migration
+
+Downloaded the first S3 copy to the Mac, decrypted it with the private
+key kept off the VPS, and did a full restore into a throwaway local
+Postgres, not just a `--list`. All 10 bookkeeping tables came back with
+their data. The strongest check: the restored `api_keys.key_hash`
+matches the hash of the live API key, so a VPS rebuilt from this backup
+would accept the existing key, and Claude Code's config wouldn't need
+touching.
+
+Two things the restore turned up:
+
+- `pg_restore` 18 (on the Mac) sends `SET transaction_timeout = 0`,
+  which a Postgres 16 server rejects. It's the same version gap as the
+  Pagila load. `pg_restore` skips that one statement and carries on,
+  so it's harmless, but it makes the exit code 1 on an otherwise good
+  restore. Use a matching client version, or ignore that one error.
+- **The restored `alembic_version` was `072ff1f9b9d6`, not
+  `1dc23f88f669`.** The unique constraint on
+  `console_credentials.username` had been committed, pushed and pulled
+  to the VPS, but `alembic upgrade head` was never run there, so the
+  production database never got it. Pulling code doesn't apply
+  migrations. A restore test checking the actual schema, not just "did
+  the file decrypt", is what caught it.
+
+Small operational note: `age` refuses an identity file containing
+anything besides comments and the key, so the key file should hold the
+key and nothing else, not other credentials alongside it.
+

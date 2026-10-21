@@ -219,7 +219,3 @@ fixing it. `README.md` is the front door to all of that.
   certificate for `mcp.my.id` via a manual DNS-01 challenge, served
   by a proxy on another port. Once that's in place, uvicorn should bind
   to `127.0.0.1` instead of `0.0.0.0` (see `deploy/mcp-backbone.service`).
-- The VPS deployment's bookkeeping backups are now copied off-server
-  nightly (age-encrypted, to S3), but no restore from one of those
-  copies has been tested yet. Until one has, it's unproven that they
-  can actually be decrypted and restored.
