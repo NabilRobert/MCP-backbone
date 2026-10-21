@@ -158,6 +158,14 @@ setting things up:
   spawning it as a subprocess and driving it with the MCP SDK's own
   stdio client, not just reasoned about.
 
+## `deploy/` — files that live on the server, kept here so it can be rebuilt
+
+- **`backup_bookkeeping.sh`** — the VPS's nightly backup (installed as
+  `~/bin/backup_bookkeeping.sh`, run by cron at 03:17). Dumps the
+  bookkeeping database, encrypts it with `age`, and uploads it to S3,
+  keeping the last 14 locally and remotely. Reads every secret from
+  `.env` at run time, so this file contains none.
+
 ## `tests/` mirrors `app/`
 
 Each test file matches the thing it's testing — `test_validation.py`
