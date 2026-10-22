@@ -34,6 +34,9 @@ the fact.
   user with a valid invite code can register their own connection URL at
   signup. That's a client-reachable surface pointing the server at a host
   of the user's choosing, so the URL is treated as untrusted input (T7).
+- **Demo users are untrusted.** Anyone can sign up without an invite, but
+  only for the server's default database. They can't supply a connection
+  URL, so they never reach the T7 surface.
 
 ## Threats considered, and how they're actually mitigated
 
@@ -175,6 +178,18 @@ through the AI model's context or its transcripts.
   database password, the encryption key) live in the server's
   environment, not a secrets manager (ADR-005). That's an accepted
   tradeoff at this scale and trust level, revisited if that ever changes.
+- **The public demo database has one layer of write protection, not
+  two.** Demo signup is open, and the default target (Pagila on a managed
+  host) has no read-only database role: that host doesn't grant
+  `CREATE ROLE`. Anyone can sign up, so strangers' queries against it are
+  stopped only by the app-level validator (T1), which the red-team suite
+  tests, not by the database too. The fix is moving the demo database
+  somewhere a read-only role can be provisioned, such as the VPS's own
+  Postgres.
+- **Demo account spam beyond the caps.** Signups are capped per client IP
+  and in total per day, but someone with many IP addresses can still use
+  up the daily total. That locks out new demo signups for the day; it
+  doesn't affect existing accounts.
 - **A user's own database credentials being over-privileged.** Signup
   warns when the supplied login can write or is a superuser, but accepts
   it: it's their database. The app-level validator still blocks writes.

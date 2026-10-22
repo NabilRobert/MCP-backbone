@@ -74,7 +74,7 @@ async def login_submit(
         )
     workspace = await verify_console_login(session, username, password)
     if workspace is None:
-        login_limiter.record_failure(ip)
+        login_limiter.record(ip)
         return templates.TemplateResponse(
             request, "login.html", {"error": "Incorrect username or password."}
         )
@@ -92,9 +92,9 @@ async def signup_form(request: Request):
 @router.post("/signup")
 async def signup_submit(
     request: Request,
-    invite_code: str = Form(...),
     username: str = Form(...),
     password: str = Form(...),
+    invite_code: str = Form(""),
     connection_url: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -105,9 +105,9 @@ async def signup_submit(
             request, "signup.html", {**context, "error": _TOO_MANY_ATTEMPTS}, status_code=429
         )
     try:
-        result = await sign_up(session, invite_code, username, password, connection_url)
+        result = await sign_up(session, invite_code, username, password, connection_url, ip)
     except SignupError as exc:
-        login_limiter.record_failure(ip)
+        login_limiter.record(ip)
         return templates.TemplateResponse(
             request, "signup.html", {**context, "error": str(exc)}, status_code=400
         )

@@ -11,19 +11,18 @@
     .hint { color: #666; font-size: 0.8rem; margin-top: 0.25rem; }
     button { margin-top: 1.5rem; width: 100%; padding: 0.5rem; }
     .error { color: #a33; margin-top: 1rem; }
+    details { margin-top: 1.25rem; font-size: 0.9rem; }
+    summary { cursor: pointer; }
   </style>
 </head>
 <body>
   <h1>Sign up</h1>
-  <p>You need an invite code to sign up.</p>
+  <p>Get an API key and ask Claude questions about a sample database
+    (Pagila, a DVD-rental store). Every query is checked, read-only and logged.</p>
   <form method="post" action="/console/signup">
     <label>
-      Invite code
-      <input type="text" name="invite_code" required autofocus autocomplete="off" />
-    </label>
-    <label>
       Username
-      <input type="text" name="username" required value="{{ username or '' }}"
+      <input type="text" name="username" required autofocus value="{{ username or '' }}"
              pattern="[A-Za-z0-9_.\-]{3,32}" autocomplete="username" />
     </label>
     <label>
@@ -32,14 +31,20 @@
              autocomplete="new-password" />
       <div class="hint">At least {{ min_password }} characters. This logs you into this console.</div>
     </label>
-    <label>
-      Your database (optional)
-      <input type="password" name="connection_url" autocomplete="off"
-             placeholder="postgresql://user:password@host:5432/dbname" />
-      <div class="hint">Leave blank to use the demo database. To use your own Postgres,
-        give a read-only login on a database reachable from the internet.
-        It's stored encrypted.</div>
-    </label>
+    <details>
+      <summary>Connect your own database instead (invite only)</summary>
+      <label>
+        Invite code
+        <input type="text" name="invite_code" autocomplete="off" />
+      </label>
+      <label>
+        Your database
+        <input type="password" name="connection_url" autocomplete="off"
+               placeholder="postgresql://user:password@host:5432/dbname" />
+        <div class="hint">A read-only login on a Postgres database reachable from the
+          internet. It's stored encrypted. Leave blank to use the demo database.</div>
+      </label>
+    </details>
     <button type="submit">Create account</button>
   </form>
   {% if error %}

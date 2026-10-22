@@ -145,6 +145,13 @@ server needs.
 mitigated (THREAT_MODEL T7), with one stated residual risk (DNS rebinding
 between check and connect). Adds a secret the server must keep:
 `APP_CONNECTION_ENCRYPTION_KEY`, which must also be backed up off the server.
+**Amended (same day):** the invite gate moved to where the risk is. Signup
+*without* a code now gives a demo account on the default database only: no
+user-chosen host, no stored password, so nothing the invite was protecting.
+What's left is account spam multiplying the per-workspace rate limits,
+capped per client IP and per day. Connecting your own database still needs
+an invite. A fully gated demo would have protected little and made the
+project impossible to try.
 
 ## Reversible vs. irreversible
 

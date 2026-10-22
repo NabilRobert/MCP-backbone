@@ -22,6 +22,10 @@ class Workspace(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str]
     created_at: Mapped[datetime]
+    # How it was created: "operator" (scripts/seed_workspace.py),
+    # "invite", or "demo" (self-serve, no invite). The daily demo
+    # signup cap counts "demo" rows.
+    created_via: Mapped[str] = mapped_column(default="operator", server_default="operator")
 
 
 class ApiKey(Base):

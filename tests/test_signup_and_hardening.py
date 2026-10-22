@@ -337,3 +337,78 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
         "/console/login", data=wrong, headers={"X-Forwarded-For": "198.51.100.99"}
     )
     assert spoofed.status_code == 429
+
+
+# --- Demo signup (no invite code) -------------------------------------------
+
+
+def _demo_signup(client: TestClient, username: str, **extra: str):
+    return client.post(
+        "/console/signup", data={"username": username, "password": STRONG_PASSWORD, **extra}
+    )
+
+
+async def test_demo_signup_needs_no_invite(db_session: AsyncSession) -> None:
+    response = _demo_signup(TestClient(app), "demo-user")
+    assert response.status_code == 200
+    api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
+
+    workspace = await authenticate(db_session, api_key)
+    assert workspace.created_via == "demo"
+    data_source = (await db_session.execute(select(DataSourceConnection))).scalar_one()
+    assert data_source.connection_url == settings.target_database_url
+
+
+async def test_demo_signup_cannot_bring_its_own_database(db_session: AsyncSession) -> None:
+    response = _demo_signup(
+        TestClient(app), "demo-user", connection_url="postgresql://u:p@8.8.8.8/db"
+    )
+    assert response.status_code == 400
+    assert "needs an invite code" in response.text
+    assert (await db_session.execute(select(Workspace))).first() is None
+
+
+async def test_demo_signups_are_capped_per_ip(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.console.throttle import demo_signup_limiter
+
+    monkeypatch.setattr(demo_signup_limiter, "max_events", 2)
+    client = TestClient(app)
+    assert _demo_signup(client, "demo-one").status_code == 200
+    assert _demo_signup(client, "demo-two").status_code == 200
+    third = _demo_signup(client, "demo-three")
+    assert third.status_code == 400
+    assert "Too many demo accounts" in third.text
+
+    # An invite still works from the same address.
+    invite = await create_invite(db_session, "after-demo-cap")
+    assert _signup(client, invite, username="invited-one").status_code == 200
+
+
+async def test_demo_signups_are_capped_per_day_overall(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "demo_signups_per_day", 1)
+    assert _demo_signup(TestClient(app), "demo-one").status_code == 200
+    login_limiter.reset()
+
+    full = _demo_signup(TestClient(app), "demo-two")
+    assert full.status_code == 400
+    assert "demo is full for today" in full.text
+
+
+async def test_demo_signup_can_be_switched_off(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "demo_signups_enabled", False)
+    response = _demo_signup(TestClient(app), "demo-user")
+    assert response.status_code == 400
+    assert "needs an invite code" in response.text
+
+
+async def test_invite_signup_is_recorded_as_invite(db_session: AsyncSession) -> None:
+    invite = await create_invite(db_session, "for-created-via")
+    response = _signup(TestClient(app), invite, username="invited")
+    api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
+    assert (await authenticate(db_session, api_key)).created_via == "invite"

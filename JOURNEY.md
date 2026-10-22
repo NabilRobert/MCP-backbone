@@ -1277,3 +1277,30 @@ Verified from outside after the fix: `list_tables` works through both
 tool argument instead of the header is refused over the real internet,
 not just in tests. The laptop's plugin now points at the new address
 and connects.
+
+## 2026-10-22 (continued) — Moving the gate to where the risk is
+
+Invite-only signup was safe but defeated the point of a portfolio piece:
+nobody could try it without asking first. Looking at what the invite
+actually protected, it was two things: a stranger making the server
+connect to a host of their choosing, and the server storing a stranger's
+database password. Both come only from the "bring your own database"
+field. Trying the demo involves neither.
+
+So the gate moved. Signup without a code now gives a demo account on the
+default database. Supplying a connection URL without a code is refused
+before anything else happens. What open signup does add is account spam:
+each workspace gets its own rate limits, so many accounts mean many times
+the queries. Demo signups are capped at 3 per client IP and 50 in total
+per day. The daily total counts real rows (`Workspace.created_via`), so
+it survives restarts. The per-IP count is in memory like the login
+lockout, so a restart resets it, which is acceptable at this scale.
+
+The honest cost, recorded in THREAT_MODEL.md rather than buried: the
+demo database has no read-only role (its managed host doesn't allow
+creating one). Strangers' queries against it are stopped by the app's own
+validator alone, not by the database as well. The validator is what the
+red-team suite exercises, but it's now one layer, not two, for anyone on
+the internet. Moving the demo database to the VPS's own Postgres, where a
+read-only role can be provisioned, is the follow-up that restores the
+second layer.

@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # attempts within the window. Also applied to failed signups.
     login_max_failures: int = 5
     login_failure_window_seconds: int = 900
+    # Signup without an invite code: a demo account on the default
+    # database only. Capped so nobody can mass-create accounts to
+    # multiply the per-workspace query limits.
+    demo_signups_enabled: bool = True
+    demo_signups_per_ip_per_day: int = 3
+    demo_signups_per_day: int = 50
     # Signs the web console's login session cookie. If left unset, a
     # random one is generated at startup -- fine for local use, but it
     # means everyone gets logged out whenever the server restarts.

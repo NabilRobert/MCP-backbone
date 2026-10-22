@@ -5,6 +5,10 @@ a database's schema and run safe, read-only SQL queries against it — with
 every attempt validated, cost-checked, and logged. Built to be small enough
 to read end to end, not as a piece of a larger platform.
 
+**Try it:** sign up at **https://mcp.my.id** (no invite needed for the
+demo), install the Claude Code plugin, and ask Claude about a sample
+database. Steps under [How to use](#how-to-use).
+
 A guided tour of the codebase -- what each file does and why, following
 how a real request actually flows through it -- is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Start there if you're new to this repo.
@@ -38,7 +42,7 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 99 passing tests against a real Postgres instance, CI
+the model. 105 passing tests against a real Postgres instance, CI
 running on every push.
 
 **The MCP server can now actually be reached over a network** --
@@ -75,9 +79,11 @@ uninstalled database driver; a duplicate console username crashing
 every login attempt) found getting the first real tool call to
 actually succeed.
 
-**Invite-only signup, so other people can use it.** Anyone with an
-invite code gets their own workspace (key, audit log, rate limits),
-querying the demo database or their own. Letting users register their
+**Open demo signup, invites for your own database.** Anyone can sign
+up for a workspace (key, audit log, rate limits) on the demo database.
+Connecting your own database needs an invite code, because that's the
+part with real risk: it makes the server connect to a host you chose
+and store your database password. Letting users register their
 own database meant closing the gaps that opens: connection URLs are
 encrypted at rest, an address guard stops a URL from pointing the server
 at its own internals, `sample_rows` is now audited and rate-limited, and
@@ -168,14 +174,13 @@ match, so the two can't drift apart.
 
 ### As a user: ask Claude about a database
 
-You need an invite code from whoever runs the server.
-
-1. **Sign up** at `https://<server>/console/signup` (this project's own
-   server is `https://mcp.my.id`). Enter the invite
-   code, a username and a password of at least 12 characters.
-   - **Your database:** leave it blank to use the server's demo database
-     (Pagila, a sample DVD-rental store). To query your own Postgres
-     instead, paste its connection URL
+1. **Sign up** at `https://<server>` (this project's own server is
+   https://mcp.my.id). Pick a username and a password of at least 12
+   characters. That's all the demo needs: you get the server's sample
+   database (Pagila, a DVD-rental store).
+   - **Your own database instead (invite only):** open "Connect your own
+     database", enter the invite code from whoever runs the server, and
+     paste your Postgres connection URL
      (`postgresql://user:password@host:5432/dbname`). It must be reachable
      from the internet, and a read-only login is strongly recommended:
      signup warns you if the login can write. The URL is stored encrypted.
@@ -199,7 +204,8 @@ You need an invite code from whoever runs the server.
    data sample against your workspace, including rejected ones.
 
 Limits per workspace, per hour by default: 5 `run_query` calls and 30
-`sample_rows` calls. Listing and describing tables is unlimited. The
+`sample_rows` calls. Demo signups are capped at 3 per network and 50 in
+total per day. Listing and describing tables is unlimited. The
 server only ever runs a single read-only `SELECT`, and rejects anything
 estimated to be too expensive.
 
@@ -211,8 +217,9 @@ estimated to be too expensive.
    off the server. `APP_TARGET_DATABASE_URL` is the default database new
    workspaces query. Then run `alembic upgrade head` and start the server
    (see Running below, and `deploy/` for the systemd unit).
-2. **Invite someone.** Each code is single use and expires after 14 days by
-   default:
+2. **Invite someone who wants their own database.** Demo accounts need no
+   invite (turn them off with `APP_DEMO_SIGNUPS_ENABLED=false`). Each code is
+   single use and expires after 14 days by default:
 
    ```
    python -m scripts.create_invite --note "alice"

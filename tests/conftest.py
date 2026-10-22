@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ApiKey, ConsoleCredential, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
-from app.console.throttle import login_limiter
+from app.console.throttle import demo_signup_limiter, login_limiter
 from app.db import Base, SessionLocal, engine
 from app.query.models import DataSourceConnection
 
@@ -30,6 +30,7 @@ def _reset_login_limiter() -> None:
     """The login limiter is in-memory and process-wide; without this,
     failed logins in one test would lock out the next."""
     login_limiter.reset()
+    demo_signup_limiter.reset()
 
 
 @pytest_asyncio.fixture

@@ -86,10 +86,11 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   "only N requests per hour" rule using `RateLimitCounter`, with a
   separate counter per bucket (`query` for run_query, `sample` for
   sample_rows).
-- **`app/auth/signup.py`** — invite-only self-serve signup. Issues
-  invite codes (stored as hashes, like API keys) and turns a valid,
-  unused one into a workspace: login, API key, and a target database,
-  either the server's default or one the user supplies. The invite is
+- **`app/auth/signup.py`** — self-serve signup, in two tiers. Without
+  an invite code: a demo account on the server's default database,
+  capped per client IP and per day. With one: the user may also connect
+  their own database. Issues invite codes (stored as hashes, like API
+  keys); `Workspace.created_via` records which path made each workspace. The invite is
   claimed first, in the same transaction as everything else, so a
   failed signup leaves it unused. A user-supplied URL is
   address-checked and connected to before anything is saved.
@@ -146,8 +147,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   (invite code required), login, logout, a dashboard showing the real
   audit trail, and a keys page that can rotate or revoke the
   workspace's API key.
-- **`app/console/throttle.py`** — locks out a client IP after repeated
-  failed logins or signups. In memory, since the server is a single
+- **`app/console/throttle.py`** — per-IP limits: locks out a client IP
+  after repeated failed logins or signups, and caps demo signups per IP
+  per day. In memory, since the server is a single
   process; see its docstring for what that costs.
 - **`migrations/`** — Alembic's job: turning the Python model
   definitions above into actual `CREATE TABLE` statements run against
