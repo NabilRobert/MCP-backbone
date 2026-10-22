@@ -120,7 +120,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   here is the one place every connection to a workspace's *target*
   database goes through — both the PgBouncer prepared-statement fix and
   forcing the `+asyncpg` driver live here precisely so every call site
-  gets them automatically, instead of needing each one to remember.
+  gets them automatically, instead of needing each one to remember. So
+  does making every target transaction `READ ONLY`, so Postgres refuses
+  writes even on a database where no read-only role exists.
   Real production deployment (the VPS) keeps the bookkeeping database
   this file connects to (`APP_DATABASE_URL`) on a completely separate
   Postgres instance from any target database an AI client can actually
@@ -264,8 +266,8 @@ fixing it. `README.md` is the front door to all of that.
   HTTP layer), but never visually confirmed in an actual browser — a
   preview-sandbox limitation hit while building it, see JOURNEY.md.
 - The demo database used to live on a managed host that doesn't allow
-  `CREATE ROLE`, so it had no read-only role and relied on the app-level
-  validator alone. `deploy/setup_demo_database.sh` moves it to the VPS's
+  `CREATE ROLE`, so it had no read-only role and, until read-only
+  transactions were added, relied on the app-level validator alone. `deploy/setup_demo_database.sh` moves it to the VPS's
   own Postgres with a real read-only role. A workspace's *own* database
   (invite signups) still gets only the role the user supplies; signup
   warns when that login can write.

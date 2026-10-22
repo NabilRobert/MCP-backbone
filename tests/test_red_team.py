@@ -145,7 +145,12 @@ async def test_security_definer_function_succeeds_if_validator_is_bypassed(
     through the read-only role. This is exactly why the test above --
     the validator's function allowlist -- is the real defense, and the
     database role is not. A passing test here is expected and correct;
-    it would be dishonest to claim the role alone is airtight."""
+    it would be dishonest to claim the role alone is airtight.
+
+    This connects with a plain engine on purpose, to test the ROLE alone.
+    The app's own target connections are now also READ ONLY
+    transactions, which do refuse this write -- see
+    test_target_connections_refuse_writes_even_past_the_validator."""
     workspace, _ = readonly_role_workspace
     data_source = await get_data_source(db_session, workspace)
 
@@ -353,3 +358,52 @@ async def test_pagila_loader_drops_the_grant_that_opens_its_schema() -> None:
     )
     assert "CREATE TABLE public.actor" in patched
     assert "GRANT ALL ON SCHEMA public TO PUBLIC" not in patched
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        "with x as (insert into rt_ro_probe values (2) returning id) select * from x",
+        "select * into rt_ro_probe_copy from rt_ro_probe",
+        "create temp table rt_ro_tmp (x int)",
+        "select rt_ro_probe_write()",  # SECURITY DEFINER: a read-only ROLE can't stop this one
+        "select set_config('transaction_read_only', 'off', true), (select 1)",
+    ],
+)
+async def test_target_connections_refuse_writes_even_past_the_validator(
+    db_session: AsyncSession, write: str
+) -> None:
+    """Every connection to a target database runs in a READ ONLY
+    transaction (app/db.py's create_target_engine), so Postgres itself
+    refuses writes -- tested here by sending each one STRAIGHT to the
+    database, bypassing our validator entirely, over a superuser
+    connection that has every privilege. Needs no CREATE ROLE, so it
+    also protects targets where no read-only role can be made. Includes
+    the SECURITY DEFINER write that a read-only role lets through (see
+    test_security_definer_function_succeeds_if_validator_is_bypassed)."""
+    from app.db import create_target_engine, engine
+
+    await db_session.execute(text("create table if not exists rt_ro_probe (id int)"))
+    await db_session.execute(
+        text(
+            "create or replace function rt_ro_probe_write() returns int language sql "
+            "security definer as $$ insert into rt_ro_probe values (1) returning id $$"
+        )
+    )
+    await db_session.commit()
+
+    target = create_target_engine(engine.url.render_as_string(hide_password=False))
+    try:
+        async with target.connect() as conn:
+            assert (await conn.execute(text("show transaction_read_only"))).scalar() == "on"
+        with pytest.raises(Exception, match="read-only transaction|must be set before any query"):
+            async with target.connect() as conn:
+                await conn.execute(text(write))
+    finally:
+        await target.dispose()
+
+    written = (await db_session.execute(text("select count(*) from rt_ro_probe"))).scalar()
+    await db_session.execute(text("drop function rt_ro_probe_write()"))
+    await db_session.execute(text("drop table rt_ro_probe"))
+    await db_session.commit()
+    assert written == 0

@@ -70,10 +70,28 @@ def create_target_engine(connection_url: str) -> AsyncEngine:
     silently resolves to a DIFFERENT driver (psycopg) under this
     SQLAlchemy version, which isn't even installed -- confirmed by
     actually hitting ModuleNotFoundError: No module named 'psycopg' on
-    a real deployment's first real tool call, not a hypothetical."""
+    a real deployment's first real tool call, not a hypothetical.
+
+    And every transaction on a target connection is READ ONLY
+    (postgresql_readonly: each one starts with BEGIN READ ONLY, so it's
+    transaction-scoped and safe behind a transaction-pooling PgBouncer).
+    Postgres itself then refuses any write the app's validator might
+    miss -- a CTE-hidden INSERT, SELECT INTO, CREATE (even TEMP), and
+    a write inside a SECURITY DEFINER function, which a read-only role
+    can't stop -- and a query can't switch it off mid-statement. Unlike
+    a read-only role it needs no CREATE ROLE permission, so it covers
+    targets where one can't be made (a managed host like Sumopod, or a
+    user's own database with a writable login). Its limit: a separate
+    SET TRANSACTION READ WRITE statement, sent before any query, could
+    undo it -- which needs a way past the validator's single-SELECT
+    rule first. Where a read-only role CAN be made, use both."""
     if _POSTGRES_SCHEME.match(connection_url):
         connection_url = _POSTGRES_SCHEME.sub("postgresql+asyncpg://", connection_url, count=1)
-    return create_async_engine(connection_url, connect_args={"statement_cache_size": 0})
+    return create_async_engine(
+        connection_url,
+        connect_args={"statement_cache_size": 0},
+        execution_options={"postgresql_readonly": True},
+    )
 
 
 class Base(DeclarativeBase):

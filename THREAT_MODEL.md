@@ -59,6 +59,21 @@ inside a CTE, and a `SELECT INTO` (a different privilege check —
 blocked by the database role, confirming Postgres checks privileges
 per-operation regardless of nesting.
 
+**A second database-level layer, with no role needed:** every app
+connection to a target runs in a `READ ONLY` transaction
+(`create_target_engine` in `app/db.py`). Postgres refuses every write
+inside one, including a `CREATE TEMP TABLE` and a write inside a
+`SECURITY DEFINER` function, which the role can't stop (T2). A query
+can't switch it off mid-statement. Its strength is that it needs no
+`CREATE ROLE`, so it also protects targets where no read-only role can be
+made: a managed host that doesn't grant it (Sumopod), or a user's own
+database supplied with a writable login. Its limit is that a separate
+`SET TRANSACTION READ WRITE`, sent before any query, could undo it. That
+needs a way past the validator's single-`SELECT` rule first, which is
+why it complements the role rather than replacing it. Tested by sending
+each write straight to the database as a superuser, bypassing the
+validator (`tests/test_red_team.py`).
+
 ### T2: a function call executes a write despite looking like a read
 
 A `SELECT`-wrapped call to a `SECURITY DEFINER` function runs with the

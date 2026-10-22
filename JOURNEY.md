@@ -1369,3 +1369,37 @@ live plugin key now answers `pagila_ro`. The migration now compares
 parsed URLs with the driver normalized. The live row was converted by
 hand, since that migration had already run. No workspace now stores a
 URL, so the Sumopod copy can be retired.
+
+## 2026-10-22 (continued) — Read-only without a read-only role
+
+The question that prompted this: if Sumopod won't let us create a
+read-only login, can the database refuse writes some other way? It can.
+Postgres can run a transaction as `READ ONLY`, and inside one it refuses
+writes itself, whatever the login's privileges. That needs no permission
+at all, so it works on Sumopod, on the VPS copy, and on any database an
+invited user connects, even one they connected with a writable login.
+
+Probed before building on it, against a real Postgres as a superuser
+(every privilege), with the validator bypassed. A CTE-hidden insert,
+`SELECT INTO`, `CREATE TEMP TABLE`, and a write inside a `SECURITY
+DEFINER` function were all refused, and nothing was written. That last
+one matters most: the red-team suite has always shown a read-only
+*role* can't stop a `SECURITY DEFINER` write, and a read-only
+*transaction* does. A query trying `set_config('transaction_read_only',
+'off', ...)` mid-statement is refused too, since Postgres only allows
+the switch before the first query. What does undo it is a separate
+`SET TRANSACTION READ WRITE` sent first, seen in the same probe. That's
+the honest limit. It needs a way past the validator's single-`SELECT`
+rule, so the role and the transaction cover each other's gaps rather
+than one replacing the other.
+
+It's set in `create_target_engine`, the one place every target
+connection is made, as SQLAlchemy's `postgresql_readonly` option: each
+transaction starts with `BEGIN READ ONLY`. That's transaction-scoped, so
+it also holds behind Sumopod's transaction-pooling PgBouncer, where a
+session-level `SET` wouldn't be safe.
+
+Verified on Sumopod itself through its PgBouncer, not just a local
+Postgres: three separate transactions through `create_target_engine`
+each reported `transaction_read_only = on`, and a `CREATE TEMP TABLE`
+was refused there too.

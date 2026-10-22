@@ -42,7 +42,7 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 109 passing tests against a real Postgres instance, CI
+the model. 114 passing tests against a real Postgres instance, CI
 running on every push.
 
 **The MCP server can now actually be reached over a network** --
