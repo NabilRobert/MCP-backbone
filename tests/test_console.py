@@ -221,3 +221,44 @@ async def test_healthz_reports_database_reachability(
     down = client.get("/healthz")
     assert down.status_code == 503
     assert down.json()["database"] == "unreachable"
+
+
+async def test_audit_api_filters_by_status_and_text(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    workspace, _ = seeded_workspace
+    await run_query(db_session, workspace, "select * from demo_items")
+    await run_query(db_session, workspace, "select label from demo_items where label = '100%'")
+    await run_query(db_session, workspace, "drop table demo_items")  # rejected
+
+    client = TestClient(app, follow_redirects=False)
+    client.post("/console/login", data={"username": "admin", "password": "testpass"})
+
+    rejected = client.get("/console/api/audit", params={"status": "rejected"}).json()
+    assert [r["status"] for r in rejected] == ["rejected"]
+
+    by_text = client.get("/console/api/audit", params={"q": "LABEL ="}).json()
+    assert len(by_text) == 1 and "label = '100%'" in by_text[0]["query_text"]
+
+    # "%" is matched literally, not as a wildcard that matches everything.
+    literal = client.get("/console/api/audit", params={"q": "%"}).json()
+    assert len(literal) == 1
+
+    assert client.get("/console/api/audit", params={"status": "bogus"}).status_code == 400
+
+
+async def test_audit_daily_counts(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    workspace, _ = seeded_workspace
+    await run_query(db_session, workspace, "select * from demo_items")
+    await run_query(db_session, workspace, "drop table demo_items")
+
+    client = TestClient(app, follow_redirects=False)
+    client.post("/console/login", data={"username": "admin", "password": "testpass"})
+    days = client.get("/console/api/audit/daily").json()
+
+    assert len(days) == 14
+    assert days[-1]["succeeded"] == 1 and days[-1]["rejected"] == 1
+    assert sum(d["succeeded"] + d["rejected"] for d in days[:-1]) == 0
+    assert set(days[0]) == {"date", "succeeded", "rejected", "errored", "timed_out"}

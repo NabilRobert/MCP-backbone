@@ -85,7 +85,7 @@ One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 restoring and rebuilding the production server:
 [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
-**Tests** (127, against real Postgres, run in CI on every push) need a
+**Tests** (129, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
 `CREATEROLE`, because the red-team tests create real throwaway roles:

@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Audit trail</h1>
+
+<h2>Last 14 days</h2>
+<div id="daily-chart" class="chart"></div>
+<p class="legend"><span class="swatch bar-ok"></span> succeeded
+  <span class="swatch bar-failed"></span> rejected, errored or timed out</p>
+
+<div class="filters">
+  <label>Status
+    <select id="filter-status">
+      <option value="">All</option>
+      <option value="succeeded">Succeeded</option>
+      <option value="rejected">Rejected</option>
+      <option value="errored">Errored</option>
+      <option value="timed_out">Timed out</option>
+    </select>
+  </label>
+  <label>Query contains
+    <input id="filter-search" type="search" placeholder="e.g. payment" />
+  </label>
+</div>
+
 <p id="summary"></p>
 <table>
   <thead>

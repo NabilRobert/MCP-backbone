@@ -149,10 +149,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   `ConsoleCredential` (deliberately separate from `ApiKey` -- see
   app/auth/models.py -- so revoking a compromised API key never locks
   the operator out of viewing that workspace's own audit history).
-- **`app/console/routes.py`** — the web dashboard's pages: signup
-  (invite code required), login, logout, a dashboard showing the real
-  audit trail, and a keys page that can rotate or revoke the
-  workspace's API key.
+- **`app/console/routes.py`** — the web dashboard's pages: signup, login,
+  logout, a dashboard showing the real audit trail (filterable by status
+  and query text, with a 14-day chart of queries per day), and a keys
+  page that issues a key at a chosen access level or revokes it.
 - **`app/console/throttle.py`** — per-IP limits: locks out a client IP
   after repeated failed logins or signups, and caps demo signups per IP
   per day. Stored in the database (`ThrottleEvent`, hashed IPs, pruned

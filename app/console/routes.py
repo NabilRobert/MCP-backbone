@@ -4,13 +4,14 @@ from data the rest of the app already produces (QueryExecution rows,
 ApiKey status) -- the console adds no new capability, just a way to
 see it in a browser."""
 
+import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
@@ -31,6 +32,10 @@ from app.query.models import QueryExecution
 
 router = APIRouter(prefix="/console")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+# Every status an audit row can have (app/query/service.py), in display order.
+AUDIT_STATUSES = ("succeeded", "rejected", "errored", "timed_out")
+DAILY_CHART_DAYS = 14
 
 
 async def _require_login(request: Request, session: AsyncSession) -> Workspace | RedirectResponse:
@@ -237,22 +242,31 @@ async def _keys_page(
 
 @router.get("/api/audit", response_model=None)
 async def api_audit(
-    request: Request, session: AsyncSession = Depends(get_session)
-) -> list[dict[str, Any]] | RedirectResponse:
+    request: Request,
+    status: str = "",
+    q: str = "",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]] | RedirectResponse | JSONResponse:
     """Returns the most recent audit log rows for the logged-in
     workspace as JSON -- polled periodically by the dashboard page's
-    TypeScript to refresh the table without a full page reload."""
+    TypeScript to refresh the table without a full page reload.
+    Optional filters: `status` (one of AUDIT_STATUSES) and `q`, a
+    case-insensitive substring of the query text."""
     workspace_or_redirect = await _require_login(request, session)
     if isinstance(workspace_or_redirect, RedirectResponse):
         return workspace_or_redirect
     workspace = workspace_or_redirect
+    if status and status not in AUDIT_STATUSES:
+        return JSONResponse({"error": f"unknown status {status!r}"}, status_code=400)
 
-    result = await session.execute(
-        select(QueryExecution)
-        .where(QueryExecution.workspace_id == workspace.id)
-        .order_by(QueryExecution.created_at.desc())
-        .limit(100)
-    )
+    query = select(QueryExecution).where(QueryExecution.workspace_id == workspace.id)
+    if status:
+        query = query.where(QueryExecution.status == status)
+    if q:
+        # Escaped, so a "%" or "_" the user types matches literally.
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.where(QueryExecution.query_text.ilike(f"%{escaped}%", escape="\\"))
+    result = await session.execute(query.order_by(QueryExecution.created_at.desc()).limit(100))
     return [
         {
             "query_text": row.query_text,
@@ -262,4 +276,36 @@ async def api_audit(
             "created_at": row.created_at.isoformat(),
         }
         for row in result.scalars()
+    ]
+
+
+@router.get("/api/audit/daily", response_model=None)
+async def api_audit_daily(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> list[dict[str, Any]] | RedirectResponse:
+    """Per-day counts by status for the last DAILY_CHART_DAYS days (UTC),
+    zero-filled, for the dashboard's chart."""
+    workspace_or_redirect = await _require_login(request, session)
+    if isinstance(workspace_or_redirect, RedirectResponse):
+        return workspace_or_redirect
+    workspace = workspace_or_redirect
+
+    today = datetime.datetime.now(datetime.UTC).date()
+    first_day = today - datetime.timedelta(days=DAILY_CHART_DAYS - 1)
+    day = func.date(func.timezone("UTC", QueryExecution.created_at))
+    result = await session.execute(
+        select(day, QueryExecution.status, func.count())
+        .where(
+            QueryExecution.workspace_id == workspace.id,
+            QueryExecution.created_at
+            >= datetime.datetime.combine(first_day, datetime.time(), datetime.UTC),
+        )
+        .group_by(day, QueryExecution.status)
+    )
+    counts: dict[tuple[datetime.date, str], int] = {
+        (row[0], row[1]): row[2] for row in result.all()
+    }
+    days = [first_day + datetime.timedelta(days=i) for i in range(DAILY_CHART_DAYS)]
+    return [
+        {"date": d.isoformat(), **{s: counts.get((d, s), 0) for s in AUDIT_STATUSES}} for d in days
     ]

@@ -1509,3 +1509,17 @@ And a refused `run_query` or `sample_rows` still gets an audit row
 logged" shouldn't have an exception for attempts the server turned
 away. Tested through the real MCP protocol for every preset, checking
 each tool is allowed or refused exactly as the preset says.
+
+## 2026-10-23 (continued) — Closing the plan's last gaps
+
+Measured against its own plan documents, Project 1 had two unmet items.
+The Phase-1 success metric said every ADR should cite a primary source
+where one exists, and none did; each now has a Sources line, all links
+checked. Writing them showed the two most important decisions had no ADR
+at all: layered read-only enforcement (ADR-009) and how the benchmark is
+graded (ADR-010). The Phase-2 must-haves asked for a dashboard "with
+filters / basic charts", and it had neither. It now filters by status and
+query text (server-side, with `%` and `_` matched literally; the test
+fails without the escaping) and draws a 14-day chart as plain SVG, with
+no chart library. It was checked in a real browser against sample data,
+including a row of HTML that has to show up as text, not run.
