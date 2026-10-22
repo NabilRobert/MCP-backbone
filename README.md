@@ -5,9 +5,14 @@ it, safely. Every query is parsed, cost-checked, run read-only and logged,
 and the database itself refuses writes, so a validator bug doesn't become
 a data-loss bug.
 
-**Try it:** sign up at **https://mcp.my.id** (no invite needed), install
-the Claude Code plugin, and ask Claude about a sample database
-([how](#use-it)).
+**Try it:** **https://mcp.my.id** has a walkthrough and a signup (no
+invite needed). Install the Claude Code plugin and ask Claude about a
+sample database ([how](#use-it)).
+
+**Stack:** Python 3.12, FastAPI, the MCP Python SDK (Streamable HTTP),
+SQLAlchemy (async) with asyncpg, sqlglot, PostgreSQL 16, Alembic. The
+console is server-rendered Jinja2 with a little TypeScript. It's deployed
+on a VPS behind Caddy, run by systemd, with encrypted backups to S3.
 
 | 1 · Ask a question | 2 · Try to change data |
 |---|---|
@@ -46,7 +51,8 @@ might fail:
    possible the login is a read-only role too. Each covers a gap the other
    has (see [THREAT_MODEL.md](THREAT_MODEL.md)).
 6. **Audit:** every attempt, including rejected ones, is logged before a
-   result is returned. A web console shows the log live.
+   result is returned. A web console shows the log live, filterable by
+   status and query text, with a 14-day chart.
 
 Proven by an adversarial suite that sends writes straight to the database,
 bypassing the validator: [RED_TEAM.md](RED_TEAM.md).
@@ -116,6 +122,9 @@ app/
   console/    server-rendered web console (Jinja2 + a little TypeScript)
   mcp/        the MCP tools: a thin adapter, no business logic
   benchmark/  text-to-SQL eval cases and grading
+migrations/   Alembic migrations for the bookkeeping database
+tests/        130 tests against real Postgres, incl. the red-team suite
+static-src/   the console's TypeScript (compiled into app/console/static)
 plugin/       the Claude Code plugin (MCP registration + query skill)
 deploy/       systemd unit, Caddy block, firewall, backups, runbook
 scripts/      operator CLIs: invites, seeding, datasets, benchmark
@@ -129,6 +138,10 @@ scripts/      operator CLIs: invites, seeding, datasets, benchmark
   what it doesn't.
 - [RED_TEAM.md](RED_TEAM.md): the adversarial suite and its results,
   including the limits it demonstrates.
+- [BENCHMARK.md](BENCHMARK.md): how well an AI agent answers real questions
+  through it, graded strictly and leniently, with every miss explained.
+- [deploy/RUNBOOK.md](deploy/RUNBOOK.md): running, monitoring, restoring and
+  rebuilding the production server.
 - [JOURNEY.md](JOURNEY.md): the build log. What broke, what was assumed
   and turned out wrong, and why each decision landed where it did.
 - [phase-5-architecture-decisions.md](phase-5-architecture-decisions.md):
