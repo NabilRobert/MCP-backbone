@@ -79,6 +79,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   (a *separate* login for the web dashboard, so revoking the API key
   doesn't lock you out of viewing history), `RateLimitCounter` (how many
   requests a workspace has made recently).
+- **`app/auth/scopes.py`** — which of the four tools a key may call, as
+  presets (full access, explore only, schema only). `authenticate()` checks
+  the tool being called against the key's scopes; a refused data read is
+  still audited.
 - **`app/auth/security.py`** — the actual hashing math: turns a
   plain-text API key or password into something safe to store, and
   checks a plain-text value against a stored hash later.

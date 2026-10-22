@@ -1491,3 +1491,21 @@ data anywhere. What it can't control is the client's other tools, so
 that's stated as the client's job, not claimed as covered. The plugin's
 skill now tells Claude to treat results as data, never instructions,
 recorded as a partial guard that nothing depends on.
+
+## 2026-10-23 — Per-tool permissions on API keys
+
+The portfolio plan's checklist asked for per-tool permissions; every key
+could call all four tools. Keys now carry a scope, picked when issuing
+them in the console: full access, explore only (schema and sample rows,
+no `run_query`), or schema only (names and types, no data at all). It's
+least privilege for keys: something that only browses the schema
+shouldn't be able to read every row if its key leaks, and a schema-only
+key gives a prompt-injected model nothing to read but names (T10).
+
+Two decisions worth noting. Existing keys migrate to full access,
+because silently narrowing a working key would break whoever holds it.
+And a refused `run_query` or `sample_rows` still gets an audit row
+(rejected, with the reason), because "every attempt to read data is
+logged" shouldn't have an exception for attempts the server turned
+away. Tested through the real MCP protocol for every preset, checking
+each tool is allowed or refused exactly as the preset says.

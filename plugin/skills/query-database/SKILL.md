@@ -56,6 +56,10 @@ the same query:
   `sample_rows` have separate limits). Tell the user the limit resets when
   the server's window ends (an hour by default), and answer from what you
   already have.
+- **"This API key isn't allowed to use ...":** the key was issued with
+  limited access (for example, schema only). Use the tools it does allow,
+  and tell the user which tool they'd need a key with more access for.
+  Don't retry the refused tool.
 - **Authentication failed / missing API key:** the plugin's API key is
   wrong, revoked, or not set. Tell the user to update it with `/plugin`
   (configure the mcp-backbone plugin), or to issue a new key from the

@@ -27,7 +27,8 @@ A query has to pass every layer, and each layer assumes the one before it
 might fail:
 
 1. **Auth:** a workspace API key in the `Authorization` header, stored only
-   as a hash, revocable from the console. Per-workspace rate limits.
+   as a hash, revocable from the console, and limited to the tools it needs
+   (full access, explore only, or schema only). Per-workspace rate limits.
 2. **Validation:** exactly one `SELECT`. The whole syntax tree is checked for
    hidden writes (a write inside a CTE, `SELECT INTO`), and only built-in
    functions are allowed.
@@ -57,7 +58,8 @@ question fix that came out of the first run.
    and enter an invite code and its connection URL (stored encrypted; a
    read-only login is recommended).
 2. **Copy your API key.** It's shown once. Issue a new one any time from
-   the console's Keys page.
+   the console's Keys page, optionally with less access (for example, schema
+   only, for a client that never needs to read rows).
 3. **Install the plugin** in Claude Code, and enter the key when asked:
    ```
    /plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
@@ -83,7 +85,7 @@ One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 restoring and rebuilding the production server:
 [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
-**Tests** (119, against real Postgres, run in CI on every push) need a
+**Tests** (127, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
 `CREATEROLE`, because the red-team tests create real throwaway roles:

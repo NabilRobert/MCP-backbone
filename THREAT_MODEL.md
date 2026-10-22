@@ -134,7 +134,9 @@ treated as more serious than a query failure.
 
 **Mitigation:** every `QueryExecution`, `DataSourceConnection`, and rate
 limit check is scoped to the authenticated `Workspace`, resolved from the
-`ApiKey` presented. A revoked `ApiKey` cannot authenticate at all; a
+`ApiKey` presented. Within a workspace, each key is also limited to the
+tools it was issued for (`app/auth/scopes.py`), so a key given to a
+schema-browsing client can't read rows even if it leaks. A revoked `ApiKey` cannot authenticate at all; a
 separate `ConsoleCredential` (not covered by this document in depth)
 governs dashboard access independently, so key rotation doesn't lock an
 operator out of their own audit history.
@@ -221,6 +223,8 @@ pages.
   reads against one database, which passes the address guard (T7). It
   has nothing that fetches URLs, sends messages or touches files, so an
   injection can't use *this server* to send data anywhere.
+- **Only the tools the key was issued for.** A schema-only key gives an
+  injected model nothing to read but table and column names.
 - **Bounded, and on the record.** Rate limits and the 200-row cap bound
   how much an injected model can read, and every call it makes, including
   rejected ones, is in the audit log.
