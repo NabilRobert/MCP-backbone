@@ -1403,3 +1403,12 @@ Verified on Sumopod itself through its PgBouncer, not just a local
 Postgres: three separate transactions through `create_target_engine`
 each reported `transaction_read_only = on`, and a `CREATE TEMP TABLE`
 was refused there too.
+
+Sumopod is kept as a second, external database rather than retired: an
+operator workspace (`sumopod-external`) queries it with its own encrypted
+URL, while the public demo stays on the VPS copy with both layers.
+Verified live, through the server's own `get_data_source` and query
+path: it resolves to Sumopod, passes the address guard, runs with
+`transaction_read_only = on`, has a `CREATE TEMP TABLE` refused by
+Postgres, and answers a real query. The one-off `.env` backups that held
+the Sumopod URL in plain text were deleted once it was stored encrypted.

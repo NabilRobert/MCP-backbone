@@ -90,6 +90,16 @@ at its own internals, `sample_rows` is now audited and rate-limited, and
 console logins are throttled. See "How to use" below, ADR-007, and
 THREAT_MODEL.md T7-T9.
 
+**Writes are refused by the database too, not only by the validator,
+whether or not a read-only role can be made.** The live server queries
+two databases. The public demo (Pagila) runs on the VPS's own Postgres
+behind a real read-only role. A second workspace queries an external
+managed Postgres (Sumopod) that can't create roles at all. Both get
+`READ ONLY` transactions, so Postgres refuses writes either way,
+including a `SECURITY DEFINER` write that a read-only role alone lets
+through. Verified on the live server for both databases. See
+THREAT_MODEL.md T1/T2 and RED_TEAM.md.
+
 **Slice E (benchmark) now run for real -- 10/10 (100%)**:
 `scripts/run_benchmark.py` runs a PydanticAI agent (`gpt-5-mini` via
 Sumopod) against this server as a real MCP client, grading by
