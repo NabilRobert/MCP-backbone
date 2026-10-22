@@ -144,9 +144,10 @@ scripts/      operator CLIs: invites, seeding, datasets, benchmark
   rebuilding the production server.
 - [JOURNEY.md](JOURNEY.md): the build log. What broke, what was assumed
   and turned out wrong, and why each decision landed where it did.
-- [phase-5-architecture-decisions.md](phase-5-architecture-decisions.md):
-  the ADRs. Phases [1](phase-1-problem-brief.md)–[7](phase-7-slices-plan.md)
-  are the full planning trail.
+- [Architecture decisions (ADRs)](docs/planning/phase-5-architecture-decisions.md):
+  ten decisions, each with alternatives, consequences and sources.
+- [docs/planning/](docs/planning/): the full planning trail written before
+  the build, from problem brief to sliced work plan.
 
 ## License
 

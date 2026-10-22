@@ -1,7 +1,7 @@
 # Red-Team Suite Results
 
 The adversarial test suite for the safety layer, as called for in
-[phase-1-problem-brief.md](phase-1-problem-brief.md)'s success metrics:
+[phase-1-problem-brief.md](docs/planning/phase-1-problem-brief.md)'s success metrics:
 "A red-team test suite for the safety layer exists and its pass/fail
 results are published, not just claimed."
 
@@ -30,7 +30,7 @@ Organized by the threats listed in [THREAT_MODEL.md](THREAT_MODEL.md):
 ## What this suite deliberately does NOT try to prove
 
 Per the "shrink, don't cut" fallback decided in
-[phase-7-slices-plan.md](phase-7-slices-plan.md): this is a focused set
+[phase-7-slices-plan.md](docs/planning/phase-7-slices-plan.md): this is a focused set
 of representative attacks, not an exhaustive catalog of every Postgres
 function or encoding trick. See `THREAT_MODEL.md`'s "what this doesn't
 defend against" section for the honestly-stated boundaries — e.g. a

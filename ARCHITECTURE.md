@@ -258,7 +258,7 @@ see RED_TEAM.md for what it covers and why.
 
 ## The non-code files
 
-`phase-1` through `phase-7` are the planning trail (problem →
+`docs/planning/` holds `phase-1` through `phase-7`, the planning trail (problem →
 requirements → domain model → ... → work plan). `THREAT_MODEL.md` says
 what this defends against and what it doesn't. `RED_TEAM.md` is the
 published evidence for that -- the adversarial test suite's results.
