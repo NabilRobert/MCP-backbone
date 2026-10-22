@@ -95,6 +95,7 @@ not yet delivering self-serve "any database" setup.
 **Revisit if:** Self-serve connections become a real requirement — would
 need connection-string validation (blocking private IP ranges, metadata
 endpoints) before being exposed again.
+**Status:** Superseded by ADR-007 (2026-10-22).
 
 ### ADR-005: Secrets via environment variables, no secrets manager
 **Context:** Solo maintainer, small scale, no real external users' credentials
@@ -123,6 +124,27 @@ through the actual protocol. Adds one dependency, isolated to an optional
 `benchmark` extra so the core server install stays untouched.
 **Revisit if:** PydanticAI's MCP client behavior diverges from the official
 SDK's in some edge case the benchmark depends on.
+
+### ADR-007: Invite-only self-serve workspaces, with user-supplied connections
+**Context:** The server is installable as a Claude Code plugin, so other
+people can use it, and each person needs their own key, audit log and rate
+limit. Some want to query their own database rather than the demo one.
+That is exactly the requirement ADR-004 said to revisit on.
+**Decision:** Anyone holding a single-use invite code
+(`scripts/create_invite.py`) can create their own workspace at
+`/console/signup`. The workspace queries the server's default database
+unless the user supplies their own connection URL. A supplied URL must
+pass the address guard (no loopback/private/metadata addresses, re-checked
+on every use) and a live connection test, and is stored encrypted.
+**Alternatives rejected:** Open signup: anyone on the internet could make
+the server connect to hosts of their choosing, and unlimited accounts would
+mean unlimited rate-limit allowance. OAuth: the "proper" way to hand out
+credentials automatically, but far more machinery than a portfolio-scale
+server needs.
+**Consequences:** Reintroduces the SSRF surface ADR-004 removed, now
+mitigated (THREAT_MODEL T7), with one stated residual risk (DNS rebinding
+between check and connect). Adds a secret the server must keep:
+`APP_CONNECTION_ENCRYPTION_KEY`, which must also be backed up off the server.
 
 ## Reversible vs. irreversible
 

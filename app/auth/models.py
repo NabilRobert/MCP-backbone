@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
-# These four classes each describe one database table -- SQLAlchemy
+# These classes each describe one database table -- SQLAlchemy
 # turns them into real "CREATE TABLE" statements (see migrations/).
 # Every row has a random, unguessable id (a UUID) instead of a simple
 # counting number, so nobody can guess another row's id by incrementing.
@@ -73,5 +73,27 @@ class RateLimitCounter(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    # Which allowance this counter tracks: "query" (run_query) or
+    # "sample" (sample_rows). Separate rows, so each has its own limit.
+    bucket: Mapped[str] = mapped_column(default="query", server_default="query")
     window_started_at: Mapped[datetime]
     count: Mapped[int] = mapped_column(default=0)
+
+
+class InviteCode(Base):
+    """A single-use code that lets one person sign up for their own
+    workspace (app/auth/signup.py). Issued by the operator with
+    scripts/create_invite.py. Like API keys, only a hash is stored: the
+    code exists in plain text exactly once, when it's issued. `note`
+    records who it was for. used_at/used_by_workspace_id are set when
+    it's redeemed, after which it can never be redeemed again."""
+
+    __tablename__ = "invite_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    code_hash: Mapped[str] = mapped_column(unique=True)
+    note: Mapped[str]
+    created_at: Mapped[datetime]
+    expires_at: Mapped[datetime | None]
+    used_at: Mapped[datetime | None]
+    used_by_workspace_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("workspaces.id"))

@@ -31,16 +31,26 @@ def _resolve_api_key(ctx: Context, api_key: str | None) -> str:
     key-injecting wrapper already relies on, so this stays working
     unchanged for it. Checked case-insensitively by hand rather than
     assuming a specific headers object's own case handling, since
-    ctx.headers is typed as a plain Mapping."""
-    headers = ctx.headers or {}
-    auth_header = next((v for k, v in headers.items() if k.lower() == "authorization"), None)
-    if auth_header:
-        return auth_header.removeprefix("Bearer ").strip()
+    ctx.headers is typed as a plain Mapping.
+
+    Over HTTP (ctx.headers is not None), ONLY the header is accepted.
+    A key passed as a tool argument travels through the AI model's own
+    context -- it lands in transcripts and the model can repeat it --
+    so a remote client must use the header, which the model never
+    sees. The argument stays for local transports, where there's no
+    header to use."""
+    headers = ctx.headers
+    if headers is not None:
+        auth_header = next((v for k, v in headers.items() if k.lower() == "authorization"), None)
+        if auth_header:
+            return auth_header.removeprefix("Bearer ").strip()
+        raise AuthenticationError(
+            "missing API key: over HTTP, send it as an 'Authorization: Bearer <key>' header "
+            "(the api_key argument is only accepted on local transports)"
+        )
     if api_key:
         return api_key
-    raise AuthenticationError(
-        "missing API key (expected an Authorization header or the api_key argument)"
-    )
+    raise AuthenticationError("missing API key (pass the api_key argument)")
 
 
 def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:

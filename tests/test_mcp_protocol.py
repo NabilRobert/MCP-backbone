@@ -105,3 +105,22 @@ async def test_tool_calls_over_real_http_transport_with_header_auth(
             bad_table = await session.call_tool("describe_table", {"table_name": "does_not_exist"})
             assert bad_table.is_error is True
             assert "does_not_exist" in str(bad_table.content)
+
+        # Over HTTP the key must come in the header: a key passed as a
+        # tool argument travels through the AI model's own context (and
+        # its transcripts), so it's refused even when it's valid. Same
+        # server lifetime as above -- the SDK's session manager can only
+        # be started once per process.
+        async with (
+            httpx2.AsyncClient(transport=transport, base_url="http://localhost:8000") as bare,
+            streamable_http_client("http://localhost:8000/mcp", http_client=bare) as (
+                read_stream,
+                write_stream,
+            ),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
+            via_argument = await session.call_tool("list_tables", {"api_key": api_key})
+            assert via_argument.is_error is True
+            assert "Authorization" in str(via_argument.content)
+

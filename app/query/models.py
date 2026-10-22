@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.crypto import decrypt, encrypt
 from app.db import Base
 
 # These three classes describe the database tables involved in actually
@@ -13,17 +14,30 @@ from app.db import Base
 
 class DataSourceConnection(Base):
     """Which real, outside database a workspace is allowed to query.
-    connection_url is the full connection string (e.g. which host, which
-    database, which login) -- set only by the operator via the command
-    line (scripts/seed_workspace.py), never by anything a client can
-    reach, which closes off a whole category of attack (pointing the
-    server at somewhere it shouldn't connect to)."""
+    The connection string (which host, which database, which login and
+    password) is stored ENCRYPTED (see app/crypto.py) -- only the
+    `connection_url` property below ever sees it in plain text, so
+    every caller reads and writes it exactly as before.
+
+    Set either by the operator (scripts/seed_workspace.py) or by an
+    invited user at signup (app/auth/signup.py). Either way it passes
+    app/query/network_guard.py first, which refuses anything that
+    resolves to a loopback/private address -- and get_data_source()
+    re-checks that on every single use."""
 
     __tablename__ = "data_source_connections"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
-    connection_url: Mapped[str]
+    encrypted_connection_url: Mapped[str]
+
+    @property
+    def connection_url(self) -> str:
+        return decrypt(self.encrypted_connection_url)
+
+    @connection_url.setter
+    def connection_url(self, value: str) -> None:
+        self.encrypted_connection_url = encrypt(value)
 
 
 class QueryExecution(Base):

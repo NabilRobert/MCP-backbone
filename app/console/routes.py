@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
 from app.auth.service import get_active_api_key, revoke_api_key, rotate_api_key
+from app.auth.signup import MIN_PASSWORD_LENGTH, SignupError, sign_up
 from app.console.auth import get_logged_in_workspace, log_in, log_out, verify_console_login
+from app.console.throttle import login_limiter
 from app.db import get_session
 from app.query.models import QueryExecution
 
@@ -36,6 +38,16 @@ async def _require_login(
     return workspace
 
 
+def _client_ip(request: Request) -> str:
+    # uvicorn faces the internet directly (no proxy in front), so the
+    # socket's peer address is the real client -- no X-Forwarded-For
+    # header to trust or spoof.
+    return request.client.host if request.client else "unknown"
+
+
+_TOO_MANY_ATTEMPTS = "Too many failed attempts. Try again in a few minutes."
+
+
 @router.get("/login")
 async def login_form(request: Request):
     return templates.TemplateResponse(request, "login.html", {"error": None})
@@ -48,13 +60,65 @@ async def login_submit(
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ):
+    ip = _client_ip(request)
+    # Checked before the password is even looked at, so a locked-out
+    # client learns nothing more, not even whether a guess was right.
+    if login_limiter.is_blocked(ip):
+        return templates.TemplateResponse(
+            request, "login.html", {"error": _TOO_MANY_ATTEMPTS}, status_code=429
+        )
     workspace = await verify_console_login(session, username, password)
     if workspace is None:
+        login_limiter.record_failure(ip)
         return templates.TemplateResponse(
             request, "login.html", {"error": "Incorrect username or password."}
         )
     log_in(request, workspace)
     return RedirectResponse("/console/", status_code=303)
+
+
+@router.get("/signup")
+async def signup_form(request: Request):
+    return templates.TemplateResponse(
+        request, "signup.html", {"error": None, "min_password": MIN_PASSWORD_LENGTH}
+    )
+
+
+@router.post("/signup")
+async def signup_submit(
+    request: Request,
+    invite_code: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+    connection_url: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+):
+    ip = _client_ip(request)
+    context = {"min_password": MIN_PASSWORD_LENGTH, "username": username}
+    if login_limiter.is_blocked(ip):
+        return templates.TemplateResponse(
+            request, "signup.html", {**context, "error": _TOO_MANY_ATTEMPTS}, status_code=429
+        )
+    try:
+        result = await sign_up(session, invite_code, username, password, connection_url)
+    except SignupError as exc:
+        login_limiter.record_failure(ip)
+        return templates.TemplateResponse(
+            request, "signup.html", {**context, "error": str(exc)}, status_code=400
+        )
+
+    log_in(request, result.workspace)
+    # Rendered directly, not redirected: like a rotated key, the new
+    # plain-text key only ever exists in this one response.
+    return templates.TemplateResponse(
+        request,
+        "signup_done.html",
+        {
+            "api_key": result.api_key,
+            "warnings": result.warnings,
+            "mcp_url": f"{str(request.base_url).rstrip('/')}/mcp/",
+        },
+    )
 
 
 @router.post("/logout")

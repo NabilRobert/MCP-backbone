@@ -1185,3 +1185,64 @@ schema first, and answered with a single `run_query`. The same run
 surfaced a real gap: Claude guessed `describe_table`'s argument as `table`
 instead of `table_name` and wasted two calls before correcting itself. The
 skill now lists each tool's real argument names.
+
+## 2026-10-22 (continued) — Invite-only signup, and the holes it would have opened
+
+With the plugin installable by anyone, every user would have shared one
+workspace's key: no way to cut off one person, one shared rate limit,
+and an audit log that can't say who asked what. The fix is a workspace
+per person, created through invite-only signup. A new workspace queries
+the demo database by default, or the user's own Postgres if they supply
+a connection URL.
+
+Letting users supply that URL is exactly what ADR-004 had ruled out for
+v1, and its reason still held. The bookkeeping database (audit log, key
+hashes) listens only on the VPS's loopback interface, which is where this
+server connects from. A signup pointing at `127.0.0.1:5432` would have
+aimed the server at its own internals. So a user-supplied URL now goes
+through an address guard before it's accepted, and again on every use.
+The guard refuses loopback, private, link-local (incl. cloud metadata),
+carrier-grade NAT and reserved addresses, IPv4 hidden inside IPv6
+(`::ffff:127.0.0.1`), and URL parameters that could quietly add a second
+host (`?host=`) or read a local file (`?passfile=`). The invite is
+checked before the URL is even looked at, so an uninvited visitor can't
+use the signup form to make the server probe hosts. ADR-007 records the
+reversal. THREAT_MODEL T7 states the one residual gap (DNS rebinding
+between the check and the driver's own lookup) and what bounds it.
+
+Storing other people's database passwords was the second problem.
+Connection URLs can't be hashed like API keys, because the server needs
+the real password, so they're now encrypted with a key that lives only
+in the server's environment. A leaked database or S3 backup holds
+ciphertext. The migration encrypts existing rows in place and was run
+for real against a scratch database: plaintext in, encrypted out,
+decrypts back to the original, downgrade restores it. Run without the
+key, it fails with a clear error and changes nothing, not even the
+tables created earlier in the same migration. That matters for the VPS:
+a missed step there can't leave a half-migrated database.
+
+Reviewing the auth surface for this turned up three gaps that existed
+already:
+
+- **`sample_rows` was invisible.** It returns real rows (up to 100 from
+  any table) but was neither audited nor rate-limited, so the "every
+  attempt is logged" claim was false for it. It now writes an audit row
+  per call and has its own allowance (30/hour by default, separate from
+  run_query's 5, so exploring doesn't eat the query budget).
+- **The console login had no attempt limit**, on a page facing the
+  internet. Failed logins and signups now lock out the client IP for 15
+  minutes after 5 failures. It's keyed by IP, not username, so nobody can
+  lock a real user out by failing logins in their name.
+- **A key passed as a tool argument goes through the AI model's
+  context** (transcripts, and the model can repeat it). Over HTTP only
+  the header is accepted now; the argument still works on local
+  transports, which have no headers.
+
+96 tests, up from 69, including each address class the guard must
+refuse, a signup through each failure path (each must leave the invite
+unused and create nothing), and an end-to-end signup whose key then
+authenticates. One test design note: the MCP SDK's session manager can
+only be started once per process, so the new "argument refused over
+HTTP" check had to live inside the existing HTTP test's server
+lifetime. A separate test failed with `run() can only be called once
+per instance`.

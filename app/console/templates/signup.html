@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign up -- Database MCP Console</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 4rem auto; max-width: 420px; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-size: 0.9rem; }
+    input { width: 100%; padding: 0.4rem; margin-top: 0.25rem; box-sizing: border-box; }
+    .hint { color: #666; font-size: 0.8rem; margin-top: 0.25rem; }
+    button { margin-top: 1.5rem; width: 100%; padding: 0.5rem; }
+    .error { color: #a33; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Sign up</h1>
+  <p>You need an invite code to sign up.</p>
+  <form method="post" action="/console/signup">
+    <label>
+      Invite code
+      <input type="text" name="invite_code" required autofocus autocomplete="off" />
+    </label>
+    <label>
+      Username
+      <input type="text" name="username" required value="{{ username or '' }}"
+             pattern="[A-Za-z0-9_.\-]{3,32}" autocomplete="username" />
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" required minlength="{{ min_password }}"
+             autocomplete="new-password" />
+      <div class="hint">At least {{ min_password }} characters. This logs you into this console.</div>
+    </label>
+    <label>
+      Your database (optional)
+      <input type="password" name="connection_url" autocomplete="off"
+             placeholder="postgresql://user:password@host:5432/dbname" />
+      <div class="hint">Leave blank to use the demo database. To use your own Postgres,
+        give a read-only login on a database reachable from the internet.
+        It's stored encrypted.</div>
+    </label>
+    <button type="submit">Create account</button>
+  </form>
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+  <p><a href="/console/login">Already have an account? Log in</a></p>
+</body>
+</html>

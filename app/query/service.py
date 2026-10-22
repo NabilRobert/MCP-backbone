@@ -19,6 +19,7 @@ from app.config import settings
 from app.db import create_target_engine
 from app.query.cost_check import check_cost
 from app.query.models import DataSourceConnection, QueryExecution
+from app.query.network_guard import UnsafeTargetError, ensure_public_target
 from app.query.validation import QueryRejected, validate_and_normalize
 
 # If a query fails because the DATABASE CONNECTION itself dropped (a
@@ -64,10 +65,16 @@ async def get_data_source(session: AsyncSession, workspace: Workspace) -> DataSo
     data_source = result.scalar_one_or_none()
     if data_source is None:
         raise QueryExecutionError("workspace has no data source connection configured")
+    # Re-checked on every use, not just at registration: the host's DNS
+    # could have been changed since to point somewhere private.
+    try:
+        await ensure_public_target(data_source.connection_url)
+    except UnsafeTargetError as exc:
+        raise QueryExecutionError(str(exc)) from exc
     return data_source
 
 
-async def _write_audit(
+async def write_audit(
     session: AsyncSession,
     workspace: Workspace,
     data_source: DataSourceConnection,
@@ -132,7 +139,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
             session, workspace, settings.demo_rate_limit, settings.demo_rate_limit_window_seconds
         )
     except RateLimitExceeded as exc:
-        await _write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
+        await write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
         return {"status": "rejected", "rows": [], "error": exc.reason}
 
     # Step 2: is this SQL even safe? (see app/query/validation.py for
@@ -142,7 +149,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     try:
         normalized_sql = validate_and_normalize(sql)
     except QueryRejected as exc:
-        await _write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
+        await write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
         return {"status": "rejected", "rows": [], "error": exc.reason}
 
     status = "succeeded"
@@ -161,12 +168,12 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
                     conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
                 )
             except QueryRejected as exc:
-                await _write_audit(
+                await write_audit(
                     session, workspace, data_source, sql, "rejected", None, exc.reason
                 )
                 return {"status": "rejected", "rows": [], "error": exc.reason}
             except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
-                await _write_audit(session, workspace, data_source, sql, "errored", None, str(exc))
+                await write_audit(session, workspace, data_source, sql, "errored", None, str(exc))
                 return {"status": "errored", "rows": [], "error": str(exc)}
 
             # Step 4: actually run the query, but with a safety net -- if
@@ -209,5 +216,5 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
 
     # Step 5: no matter what happened above, write it to the audit log
     # before telling the caller the result.
-    await _write_audit(session, workspace, data_source, sql, status, cost, error_message)
+    await write_audit(session, workspace, data_source, sql, status, cost, error_message)
     return {"status": status, "rows": rows, "error": error_message}

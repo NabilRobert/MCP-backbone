@@ -23,11 +23,12 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    this turns "the key is wrong" or "that table doesn't exist" into a
    clean message the AI model can actually read, instead of crashing
    with a scary traceback. `_resolve_api_key` is the "who's asking"
-   check itself: a real HTTP client authenticates with a normal
-   `Authorization: Bearer <key>` header (read via the tool's `ctx:
-   Context` parameter), while stdio/in-memory callers keep working
-   exactly as before via the plain `api_key` argument -- the header
-   is only ever a preferred alternative, never a requirement.
+   check itself: over HTTP, the key must arrive as an `Authorization:
+   Bearer <key>` header (read via the tool's `ctx: Context`
+   parameter), and a key passed as the `api_key` tool argument is
+   refused, since an argument passes through the AI model's own
+   context. Local stdio/in-memory callers, which have no headers, still
+   use the argument.
 
 2. **`app/auth/service.py`** — "who is this?" Takes the API key the
    request came with, hashes it, looks it up, and either returns the
@@ -57,7 +58,8 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    always writes down what happened in the audit log, whether the query
    succeeded, failed, or was rejected. `get_data_source` here is a small
    shared helper (used by several files) that looks up which real
-   external database a workspace is allowed to query.
+   external database a workspace is allowed to query, and re-runs the
+   address guard (`app/query/network_guard.py`) on it every time.
 
 6. **`app/query/schema_cache.py`** — `describe_table` and `sample_rows`
    live here. They answer "what columns does this table have?" and
@@ -65,7 +67,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    questions don't have to re-ask the real database every time. The
    cache is for *convenience only* — if it's wrong or stale, the real
    query in steps 3–5 still runs against the live database and can't be
-   fooled by it.
+   fooled by it. `sample_rows` returns real data, so unlike the schema
+   tools it writes an audit row and counts against its own rate-limit
+   allowance (the "sample" bucket).
 
 ## Supporting cast — the data these steps depend on
 
@@ -79,10 +83,25 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   plain-text API key or password into something safe to store, and
   checks a plain-text value against a stored hash later.
 - **`app/auth/rate_limit.py`** — the logic that actually enforces the
-  "only N requests per hour" rule using `RateLimitCounter`.
+  "only N requests per hour" rule using `RateLimitCounter`, with a
+  separate counter per bucket (`query` for run_query, `sample` for
+  sample_rows).
+- **`app/auth/signup.py`** — invite-only self-serve signup. Issues
+  invite codes (stored as hashes, like API keys) and turns a valid,
+  unused one into a workspace: login, API key, and a target database,
+  either the server's default or one the user supplies. The invite is
+  claimed first, in the same transaction as everything else, so a
+  failed signup leaves it unused. A user-supplied URL is
+  address-checked and connected to before anything is saved.
+- **`app/query/network_guard.py`** — refuses a connection URL that
+  resolves to a loopback/private/metadata address, or that carries
+  parameters which could add a second host. Without it, a user could
+  register `127.0.0.1:5432` and reach this server's own bookkeeping
+  database (THREAT_MODEL T7).
 - **`app/query/models.py`** — the database tables for the query side:
   `DataSourceConnection` (which real external database a workspace
-  points at), `QueryExecution` (the audit log row — one per attempt,
+  points at; the URL is stored encrypted and its `connection_url`
+  property decrypts it on read), `QueryExecution` (the audit log row — one per attempt,
   this *is* the audit trail), `SchemaCache` (the cached table/column
   info mentioned above).
 - **`app/benchmark/models.py` + `app/benchmark/grading.py`** — only used
@@ -107,6 +126,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   query — deliberately, not incidentally, see THREAT_MODEL.md and
   JOURNEY.md for a real incident where those two databases ended up
   being the same one.
+- **`app/crypto.py`** — encrypts and decrypts stored connection URLs
+  (Fernet), with the key from `APP_CONNECTION_ENCRYPTION_KEY`, never
+  from the database it protects. The app refuses to start without it.
 - **`app/config.py`** — reads all the `APP_*` settings (timeouts, rate
   limit, which databases to use) from environment variables into one
   typed object the rest of the code uses.
@@ -120,9 +142,13 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   `ConsoleCredential` (deliberately separate from `ApiKey` -- see
   app/auth/models.py -- so revoking a compromised API key never locks
   the operator out of viewing that workspace's own audit history).
-- **`app/console/routes.py`** — the web dashboard's pages: login,
-  logout, a dashboard showing the real audit trail, and a keys page
-  that can rotate or revoke the workspace's API key.
+- **`app/console/routes.py`** — the web dashboard's pages: signup
+  (invite code required), login, logout, a dashboard showing the real
+  audit trail, and a keys page that can rotate or revoke the
+  workspace's API key.
+- **`app/console/throttle.py`** — locks out a client IP after repeated
+  failed logins or signups. In memory, since the server is a single
+  process; see its docstring for what that costs.
 - **`migrations/`** — Alembic's job: turning the Python model
   definitions above into actual `CREATE TABLE` statements run against
   Postgres, and tracking that history so the database schema can be
@@ -132,7 +158,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
 
 These aren't part of the live server — they're one-off commands for
 setting things up:
-- **`seed_workspace.py`** — create a new workspace + its first API key.
+- **`create_invite.py`** — issue a single-use invite code for
+  someone to sign up with.
+- **`seed_workspace.py`** — create a new workspace + its first API key
+  directly, without an invite.
 - **`revoke_key.py`** — kill an existing API key.
 - **`provision_readonly_role.py`** — set up the actual restricted
   database user on the *target* database (the one being queried),

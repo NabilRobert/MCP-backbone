@@ -1,6 +1,6 @@
 """Operator-only CLI to create a workspace, its data source connection,
-console login, and first API key. See ADR-004: connection strings are never
-set through the console or any client, only here."""
+console login, and first API key, without an invite. (Invited users sign
+up themselves at /console/signup; see app/auth/signup.py.)"""
 
 import argparse
 import asyncio
@@ -11,6 +11,7 @@ from app.auth.models import ApiKey, ConsoleCredential, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
 from app.db import SessionLocal
 from app.query.models import DataSourceConnection
+from app.query.network_guard import ensure_public_target
 
 
 async def seed(name: str, connection_url: str, console_username: str, console_password: str) -> str:
@@ -19,6 +20,8 @@ async def seed(name: str, connection_url: str, console_username: str, console_pa
     dashboard login, and its first API key. Returns the API key in
     plain text -- the ONLY time it ever exists in plain text, since
     only its hash gets stored (see app/auth/security.py)."""
+    # Same address check a self-serve signup gets: the operator can mistype too.
+    await ensure_public_target(connection_url)
     async with SessionLocal() as session:
         workspace = Workspace(name=name, created_at=datetime.datetime.now(datetime.UTC))
         session.add(workspace)

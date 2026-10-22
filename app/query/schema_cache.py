@@ -13,9 +13,11 @@ from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
+from app.auth.rate_limit import RateLimitExceeded, check_and_increment
+from app.config import settings
 from app.db import create_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
-from app.query.service import QueryExecutionError, get_data_source
+from app.query.service import QueryExecutionError, get_data_source, write_audit
 
 # How long a saved copy of the schema stays "fresh" before we bother
 # asking the real database again.
@@ -102,14 +104,35 @@ async def sample_rows(
 ) -> list[dict[str, Any]]:
     """Answers "show me a few example rows from this table" -- always
     goes straight to the live database (never the cache), since this is
-    actual data, not just schema information."""
+    actual data, not just schema information.
+
+    Because it returns real data, every call is written to the audit
+    log and counted against its own rate-limit allowance, the same way
+    run_query is. Before this, a client could read the first 100 rows
+    of every table, as often as it liked, without leaving a trace."""
     data_source = await get_data_source(session, workspace)
-    metadata = await get_table_metadata(session, workspace, data_source)
-    if table_name not in metadata:
-        raise QueryExecutionError(f"table '{table_name}' not found")
 
     # Keep the sample small, no matter what was asked for.
     safe_limit = max(1, min(int(limit), 100))
+    audit_sql = f'SELECT * FROM "{table_name}" LIMIT {safe_limit}'
+
+    try:
+        await check_and_increment(
+            session,
+            workspace,
+            settings.sample_rate_limit,
+            settings.demo_rate_limit_window_seconds,
+            bucket="sample",
+        )
+    except RateLimitExceeded as exc:
+        await write_audit(session, workspace, data_source, audit_sql, "rejected", None, exc.reason)
+        raise QueryExecutionError(f"sample_rows {exc.reason}") from exc
+
+    metadata = await get_table_metadata(session, workspace, data_source)
+    if table_name not in metadata:
+        reason = f"table '{table_name}' not found"
+        await write_audit(session, workspace, data_source, audit_sql, "rejected", None, reason)
+        raise QueryExecutionError(reason)
 
     # A technical note on why this is safe to build as a plain string
     # below, instead of being a SQL-injection risk: table_name was just
@@ -126,9 +149,15 @@ async def sample_rows(
             result = await conn.execute(
                 text(f'SELECT * FROM "{quoted_name}" LIMIT :limit'), {"limit": safe_limit}
             )
-            return [
+            rows = [
                 dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
                 for row in result
             ]
+    except Exception as exc:  # recorded, then re-raised as a clean tool error
+        await write_audit(session, workspace, data_source, audit_sql, "errored", None, str(exc))
+        raise QueryExecutionError(f"sample_rows failed: {exc}") from exc
     finally:
         await engine.dispose()
+
+    await write_audit(session, workspace, data_source, audit_sql, "succeeded", None, None)
+    return rows

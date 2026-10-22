@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.console.routes import router as console_router
+from app.crypto import check_encryption_key
 from app.mcp.server import mcp
 
 # mcp.streamable_http_app() returns its own little Starlette app with
@@ -52,6 +53,9 @@ mcp_app = mcp.streamable_http_app(
 
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    # Refuse to start without a usable encryption key, rather than
+    # starting fine and failing every tool call (see app/crypto.py).
+    check_encryption_key()
     async with mcp.session_manager.run():
         yield
 

@@ -16,7 +16,11 @@ class RateLimitExceeded(Exception):
 
 
 async def check_and_increment(
-    session: AsyncSession, workspace: Workspace, limit: int, window_seconds: int
+    session: AsyncSession,
+    workspace: Workspace,
+    limit: int,
+    window_seconds: int,
+    bucket: str = "query",
 ) -> None:
     """"Fixed-window" rate limiting, explained plainly: pick a time
     window (e.g. one hour), count requests within it, and once the
@@ -30,16 +34,23 @@ async def check_and_increment(
     arriving at the exact same instant could both read the counter
     before either writes it back, letting the count run slightly over
     the limit. Fixing that needs database-level locking, which isn't
-    worth the complexity at this project's scale."""
+    worth the complexity at this project's scale.
+
+    `bucket` picks which allowance to count against ("query" for
+    run_query, "sample" for sample_rows), each with its own counter."""
     now = datetime.datetime.now(datetime.UTC)
     result = await session.execute(
-        select(RateLimitCounter).where(RateLimitCounter.workspace_id == workspace.id)
+        select(RateLimitCounter).where(
+            RateLimitCounter.workspace_id == workspace.id, RateLimitCounter.bucket == bucket
+        )
     )
     counter = result.scalar_one_or_none()
 
     if counter is None:
-        # First request this workspace has ever made -- start a fresh counter.
-        counter = RateLimitCounter(workspace_id=workspace.id, window_started_at=now, count=0)
+        # First request this workspace has made in this bucket -- start a fresh counter.
+        counter = RateLimitCounter(
+            workspace_id=workspace.id, bucket=bucket, window_started_at=now, count=0
+        )
         session.add(counter)
     elif (now - counter.window_started_at).total_seconds() > window_seconds:
         # The previous window has expired -- reset the clock and the count.

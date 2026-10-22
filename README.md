@@ -38,7 +38,7 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 69 passing tests against a real Postgres instance, CI
+the model. 96 passing tests against a real Postgres instance, CI
 running on every push.
 
 **The MCP server can now actually be reached over a network** --
@@ -74,6 +74,15 @@ real bugs (a target connection URL silently resolving to an
 uninstalled database driver; a duplicate console username crashing
 every login attempt) found getting the first real tool call to
 actually succeed.
+
+**Invite-only signup, so other people can use it.** Anyone with an
+invite code gets their own workspace (key, audit log, rate limits),
+querying the demo database or their own. Letting users register their
+own database meant closing the gaps that opens: connection URLs are
+encrypted at rest, an address guard stops a URL from pointing the server
+at its own internals, `sample_rows` is now audited and rate-limited, and
+console logins are throttled. See "How to use" below, ADR-007, and
+THREAT_MODEL.md T7-T9.
 
 **Slice E (benchmark) now run for real -- 10/10 (100%)**:
 `scripts/run_benchmark.py` runs a PydanticAI agent (`gpt-5-mini` via
@@ -125,6 +134,7 @@ app/
   benchmark/  text-to-SQL eval cases and results
   console/    server-rendered web console (Jinja2 + TS)
   mcp/        the MCP protocol layer (thin adapter, no business logic)
+plugin/       the Claude Code plugin (MCP registration + query-database skill)
 static-src/   TypeScript source for the console, compiled to app/console/static
 ```
 
@@ -154,32 +164,64 @@ cd static-src && npm ci && npm run build
 CI rebuilds it on every push and fails if the committed copy doesn't
 match, so the two can't drift apart.
 
-## Using it from Claude Code: the plugin
+## How to use
 
-`plugin/` is a Claude Code plugin, and this repo is its marketplace. It
-registers a running server's `/mcp/` endpoint as an MCP server (sending the
-API key as an `Authorization: Bearer` header) and adds a `query-database`
-skill that tells Claude how to use the four tools well. For example: explore
-the schema for free first, spend the rate-limited `run_query` calls only on
-the final query, and how to react to each kind of rejection.
+### As a user: ask Claude about a database
 
-```
-/plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
-```
+You need an invite code from whoever runs the server.
 
-or, from a shell:
+1. **Sign up** at `https://<server>/console/signup` (this project's own
+   server is `https://mcp.my.id:8443/console/signup`). Enter the invite
+   code, a username and a password of at least 12 characters.
+   - **Your database:** leave it blank to use the server's demo database
+     (Pagila, a sample DVD-rental store). To query your own Postgres
+     instead, paste its connection URL
+     (`postgresql://user:password@host:5432/dbname`). It must be reachable
+     from the internet, and a read-only login is strongly recommended:
+     signup warns you if the login can write. The URL is stored encrypted.
+2. **Copy your API key.** The page after signup shows it once. Lost it?
+   Log into the console and issue a new one on the **Keys** page; the old
+   one stops working immediately.
+3. **Install the plugin** in Claude Code:
 
-```
-claude plugin marketplace add NabilRobert/MCP-backbone
-claude plugin install mcp-backbone@mcp-backbone
-```
+   ```
+   /plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
+   ```
 
-Claude Code then asks for two values: the server URL (defaults to this
-project's own deployment, `https://mcp.my.id:8443/mcp/`) and an API key that
-server issued (`scripts/seed_workspace.py`, or rotated from the console). The
-key is marked sensitive, so it goes to your OS credential store, not
-`settings.json`. The plugin can't create a key itself: only the server can
-issue one, and it stores just a hash of it.
+   When asked, enter the server URL (`https://<server>/mcp/`; the default is
+   this project's own server) and your API key. The key goes to your OS
+   credential store, not a settings file.
+4. **Ask.** For example: "which film category has the most films?" Claude
+   looks at the schema, writes one read-only query and answers. The
+   plugin's `query-database` skill tells it how to use the tools well, such
+   as exploring before spending a query and how to react to a rejection.
+5. **Check what ran.** The console's **Dashboard** lists every query and
+   data sample against your workspace, including rejected ones.
+
+Limits per workspace, per hour by default: 5 `run_query` calls and 30
+`sample_rows` calls. Listing and describing tables is unlimited. The
+server only ever runs a single read-only `SELECT`, and rejects anything
+estimated to be too expensive.
+
+### As the operator: run the server and invite people
+
+1. **Deploy and configure.** Copy `.env.example` to `.env` and fill it in.
+   `APP_CONNECTION_ENCRYPTION_KEY` is required: the server won't start
+   without it. Generate it with the command in `.env.example` and keep a copy
+   off the server. `APP_TARGET_DATABASE_URL` is the default database new
+   workspaces query. Then run `alembic upgrade head` and start the server
+   (see Running below, and `deploy/` for the systemd unit).
+2. **Invite someone.** Each code is single use and expires after 14 days by
+   default:
+
+   ```
+   python -m scripts.create_invite --note "alice"
+   ```
+
+   Send them the code and the signup link.
+3. **Manage access.** Revoke a key from the console, or with
+   `scripts/revoke_key.py`. `scripts/seed_workspace.py` still creates a
+   workspace directly, without an invite.
 
 ## Running tests: the `APP_DATABASE_URL` privilege requirement
 

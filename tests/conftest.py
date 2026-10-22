@@ -1,7 +1,18 @@
 import datetime
+import os
 import secrets
 from collections.abc import AsyncGenerator
 
+from cryptography.fernet import Fernet
+
+# Set before anything imports app.config (which reads settings once, at
+# import). A throwaway encryption key per test run; and the test target
+# database IS localhost, which the address guard (app/query/network_guard.py)
+# would otherwise refuse. Real env vars still win, via setdefault.
+os.environ.setdefault("APP_CONNECTION_ENCRYPTION_KEY", Fernet.generate_key().decode())
+os.environ.setdefault("APP_ALLOW_PRIVATE_TARGETS", "true")
+
+import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
@@ -9,8 +20,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ApiKey, ConsoleCredential, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
+from app.console.throttle import login_limiter
 from app.db import Base, SessionLocal, engine
 from app.query.models import DataSourceConnection
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_limiter() -> None:
+    """The login limiter is in-memory and process-wide; without this,
+    failed logins in one test would lock out the next."""
+    login_limiter.reset()
 
 
 @pytest_asyncio.fixture

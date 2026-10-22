@@ -27,8 +27,28 @@ class Settings(BaseSettings):
     # actual measurements behind this number and a known gap it
     # doesn't close.
     cost_threshold: int = 40_000
-    demo_rate_limit: int = 5  # max requests per workspace per window
+    demo_rate_limit: int = 5  # max run_query calls per workspace per window
     demo_rate_limit_window_seconds: int = 3600  # how long that window is
+    # sample_rows returns real data too, so it's audited and limited as
+    # well -- but on its own, larger allowance, since it's how a client
+    # learns what the data looks like before spending a run_query.
+    sample_rate_limit: int = 30
+    # Encrypts every stored target-database connection URL (they hold
+    # passwords). A Fernet key: generate one with
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Keep a copy somewhere safe off the server -- lose it and every
+    # stored connection URL becomes unreadable.
+    connection_encryption_key: str = ""
+    # Lets a workspace's target database resolve to a loopback/private
+    # address. Off by default: once users can register their own
+    # connection URL, one pointing at 127.0.0.1 would reach this
+    # server's own bookkeeping database. Only for local development and
+    # the test suite, where the target genuinely is localhost.
+    allow_private_targets: bool = False
+    # Console login: lock out a client IP after this many failed
+    # attempts within the window. Also applied to failed signups.
+    login_max_failures: int = 5
+    login_failure_window_seconds: int = 900
     # Signs the web console's login session cookie. If left unset, a
     # random one is generated at startup -- fine for local use, but it
     # means everyone gets logged out whenever the server restarts.

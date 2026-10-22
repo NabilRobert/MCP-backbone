@@ -1,7 +1,7 @@
 {
   "name": "mcp-backbone",
   "displayName": "Database MCP Server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Explore a database's schema and run safe, read-only SQL against it through a deployed MCP-backbone server. Every query is validated, cost-checked and audit-logged server-side.",
   "author": {
     "name": "NabilRobert",
@@ -21,7 +21,7 @@
     "api_key": {
       "type": "string",
       "title": "API key",
-      "description": "A workspace API key issued by that server (scripts/seed_workspace.py, or rotated from its web console)",
+      "description": "Your API key from that server: shown when you sign up at /console/signup, or issue a new one on the console Keys page",
       "sensitive": true,
       "required": true
     }

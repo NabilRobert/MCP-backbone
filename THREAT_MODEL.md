@@ -28,9 +28,12 @@ the fact.
 - **The console's browser session is untrusted input** in the standard
   web sense (CSRF, XSS) — out of scope for this document's focus on the
   query-safety layer, but not ignored; see Phase 4.
-- **The operator (Arthur) is trusted.** Connection strings and role
-  credentials are set via CLI only (ADR-004), never through any
-  client-reachable surface.
+- **The operator (Arthur) is trusted.** They issue invite codes and can
+  seed workspaces directly from the CLI.
+- **Invited users are semi-trusted.** Since ADR-007 replaced ADR-004, a
+  user with a valid invite code can register their own connection URL at
+  signup. That's a client-reachable surface pointing the server at a host
+  of the user's choosing, so the URL is treated as untrusted input (T7).
 
 ## Threats considered, and how they're actually mitigated
 
@@ -118,12 +121,63 @@ separate `ConsoleCredential` (not covered by this document in depth)
 governs dashboard access independently, so key rotation doesn't lock an
 operator out of their own audit history.
 
+### T7: a user-supplied connection URL points the server at its own internals (SSRF)
+
+The bookkeeping database (audit log, key hashes) listens only on the
+server's loopback interface, which is exactly where this server connects
+from. A signup with `postgresql://...@127.0.0.1:5432/...` would point the
+server straight at it.
+
+**Mitigation:** `app/query/network_guard.py` resolves the host and refuses
+any loopback, private, link-local (incl. cloud metadata), carrier-grade
+NAT or reserved address, including IPv4 hidden inside IPv6
+(`::ffff:127.0.0.1`). It also refuses URL parameters that could add a
+second host (`?host=`) or read local files (`?passfile=`). It runs at
+signup and again on every use (`get_data_source`), so a DNS change after
+registration is caught too. The invite is checked before the URL is even
+looked at, so an uninvited visitor can't use signup to make the server
+probe hosts. Tests cover each address class and parameter.
+
+**Residual risk:** the check resolves the name, then the driver resolves
+it again to connect. A hostname whose DNS flips between those two lookups
+(DNS rebinding) could slip through. Invite-only signup bounds this: only
+people the operator chose can register a URL.
+
+### T8: a leaked bookkeeping database or backup exposes users' database passwords
+
+Connection URLs can't be hashed like API keys: the server needs the real
+password to connect.
+
+**Mitigation:** they're encrypted at rest with Fernet (`app/crypto.py`).
+The key lives in the server's environment, never in the database it
+protects, so a database dump or one of its S3 backups contains only
+ciphertext. The server refuses to start without the key. API keys and
+invite codes are stored only as hashes, as before.
+
+**Limit:** someone with full control of the running server has both the
+data and the key. This protects against leaks, not a full server
+compromise.
+
+### T9: data read through `sample_rows`, or console passwords guessed, without limit
+
+**Mitigation:** `sample_rows` returns real rows, so it's now audited (one
+`QueryExecution` per call, same as `run_query`) and rate-limited on its
+own allowance. Before this, it could read the first 100 rows of every
+table, as often as the caller liked, and leave no trace. Console login
+and signup lock out a client IP after repeated failures
+(`app/console/throttle.py`). Over HTTP the API key is accepted only in
+the `Authorization` header, never as a tool argument, so it never passes
+through the AI model's context or its transcripts.
+
 ## What this does *not* defend against (stated honestly, not hand-waved)
 
-- **A compromised operator machine or leaked connection string.**
-  Connection strings are operator-set via CLI/environment, not a secrets
-  manager (ADR-005) — an accepted tradeoff at this scale and trust level,
-  revisited if that ever changes.
+- **A compromised operator machine or server.** Secrets (the bookkeeping
+  database password, the encryption key) live in the server's
+  environment, not a secrets manager (ADR-005). That's an accepted
+  tradeoff at this scale and trust level, revisited if that ever changes.
+- **A user's own database credentials being over-privileged.** Signup
+  warns when the supplied login can write or is a superuser, but accepts
+  it: it's their database. The app-level validator still blocks writes.
 - **A target schema whose owner adds a dangerous `SECURITY DEFINER`
   function *after* the allowlist and role are set up**, if that function
   happens to also be given a name sqlglot recognizes as a safe builtin —
