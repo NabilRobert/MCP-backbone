@@ -10,20 +10,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from sqlalchemy.engine.url import make_url
-
 from app.config import settings
 from app.crypto import decrypt, encrypt
-
-
-def _same_database(a: str, b: str) -> bool:
-    """Same database and login, ignoring the driver prefix: "postgresql://"
-    and "postgresql+asyncpg://" connect identically here (app/db.py forces
-    asyncpg either way). An exact string comparison missed the first real
-    workspace this was run against, whose stored URL differed from the
-    setting only in that prefix."""
-    url_a, url_b = make_url(a), make_url(b)
-    return url_a.set(drivername="postgresql") == url_b.set(drivername="postgresql")
 
 
 # revision identifiers, used by Alembic.
@@ -45,7 +33,7 @@ def upgrade() -> None:
         sa.text("SELECT id, encrypted_connection_url FROM data_source_connections")
     ).all()
     for row_id, token in rows:
-        if token is not None and _same_database(decrypt(token), settings.target_database_url):
+        if token is not None and decrypt(token) == settings.target_database_url:
             bind.execute(
                 sa.text(
                     "UPDATE data_source_connections SET encrypted_connection_url = NULL "
