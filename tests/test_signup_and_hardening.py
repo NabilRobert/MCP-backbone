@@ -4,6 +4,7 @@ private-address guard, sample_rows auditing/rate limiting, and console
 login throttling."""
 
 import datetime
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -302,6 +303,12 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
     be able to dodge the lockout by sending its own X-Forwarded-For."""
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+    def behind_proxy(trusted_hosts: str) -> TestClient:
+        # cast: uvicorn and Starlette each declare their own ASGI app
+        # types, which pyright can't match up, though both are plain ASGI.
+        wrapped = ProxyHeadersMiddleware(cast(Any, app), trusted_hosts=trusted_hosts)
+        return TestClient(cast(Any, wrapped))
+
     wrong = {"username": "admin", "password": "wrong"}
 
     def fail_until_locked(client: TestClient, forwarded_for: str) -> None:
@@ -309,7 +316,7 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
             client.post("/console/login", data=wrong, headers={"X-Forwarded-For": forwarded_for})
 
     # TestClient's peer address is "testclient": trusted here, like Caddy.
-    via_proxy = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="testclient"))
+    via_proxy = behind_proxy("testclient")
     fail_until_locked(via_proxy, "203.0.113.1")
     locked = via_proxy.post(
         "/console/login", data=wrong, headers={"X-Forwarded-For": "203.0.113.1"}
@@ -323,7 +330,7 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
     # Untrusted peer: its X-Forwarded-For is ignored, so rotating it
     # doesn't reset the count.
     login_limiter.reset()
-    direct = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="172.18.0.0/16"))
+    direct = behind_proxy("172.18.0.0/16")
     for i in range(settings.login_max_failures):
         direct.post("/console/login", data=wrong, headers={"X-Forwarded-For": f"198.51.100.{i}"})
     spoofed = direct.post(
