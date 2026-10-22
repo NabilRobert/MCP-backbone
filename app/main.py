@@ -9,9 +9,10 @@ two separate processes to run and expose."""
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import text
@@ -19,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.console.routes import router as console_router
+from app.console.routes import templates
 from app.crypto import check_encryption_key
 from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
@@ -66,6 +68,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title="Database MCP Console", lifespan=lifespan)
 
+STATIC_DIR = Path(__file__).parent / "console" / "static"
+
 # The console's signed session cookie. same_site="strict" is the console's
 # CSRF defense (every form is a same-origin POST). https_only is on for the
 # deployment, off for local plain-HTTP development.
@@ -79,19 +83,28 @@ app.add_middleware(
 app.include_router(console_router)
 # Serves the compiled TypeScript (see static-src/) and any other static
 # files the console's pages need, at /console/static/...
-app.mount("/console/static", StaticFiles(directory="app/console/static"), name="console-static")
+app.mount("/console/static", StaticFiles(directory=STATIC_DIR), name="console-static")
 # The actual MCP server, reachable over a real network connection for
 # the first time -- see JOURNEY.md for why that wasn't true before.
 app.mount("/mcp", mcp_app)
 
 
+# Drop a GIF here and the landing page shows it; until then, a placeholder.
+DEMO_FILE = STATIC_DIR / "demo.gif"
+
+
 @app.get("/", include_in_schema=False)
-async def root(request: Request) -> RedirectResponse:
-    """The bare domain is the front door: logged-in users go to their
-    dashboard, everyone else to signup (which links to login)."""
-    if request.session.get("workspace_id"):
-        return RedirectResponse("/console/", status_code=307)
-    return RedirectResponse("/console/signup", status_code=307)
+async def landing(request: Request):
+    """The public front page: what this is, the demo, and a way in."""
+    return templates.TemplateResponse(
+        request,
+        "landing.html",
+        {
+            "logged_in": bool(request.session.get("workspace_id")),
+            "demo_url": "/console/static/demo.gif" if DEMO_FILE.exists() else None,
+            "base_url": str(request.base_url).rstrip("/"),
+        },
+    )
 
 
 @app.get("/healthz", response_model=None)

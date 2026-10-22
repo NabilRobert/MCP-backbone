@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Database MCP Server: let an AI query Postgres, safely</title>
+  <meta name="description"
+        content="An MCP server that lets an AI model explore and query a Postgres database read-only, with every query checked, limited and audited." />
+  <meta property="og:title" content="Database MCP Server" />
+  <meta property="og:description"
+        content="Let an AI query a Postgres database safely: read-only, cost-checked, rate-limited and audited." />
+  <meta property="og:type" content="website" />
+  {% if demo_url %}<meta property="og:image" content="{{ base_url }}{{ demo_url }}" />{% endif %}
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 760px; padding: 0 1rem; color: #1b1f24; line-height: 1.5; }
+    header p { font-size: 1.15rem; color: #444; margin-top: 0.25rem; }
+    h1 { font-size: 2rem; margin-bottom: 0; }
+    h2 { font-size: 1.15rem; margin-top: 2.25rem; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0; }
+    .button { display: inline-block; padding: 0.6rem 1.1rem; border-radius: 6px; text-decoration: none; font-weight: 600; }
+    .primary { background: #1f6feb; color: #fff; }
+    .secondary { border: 1px solid #c8ccd2; color: #1b1f24; }
+    .demo img { width: 100%; height: auto; border-radius: 8px; border: 1px solid #d0d7de; }
+    .demo-placeholder { aspect-ratio: 1000 / 664; border: 2px dashed #c8ccd2; border-radius: 8px; display: flex;
+                        align-items: center; justify-content: center; color: #777; text-align: center; padding: 1rem; }
+    ol.steps { padding-left: 1.2rem; }
+    ol.steps li { margin: 0.35rem 0; }
+    ul.safety { padding-left: 1.2rem; }
+    ul.safety li { margin: 0.35rem 0; }
+    pre { background: #f4f5f7; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.9rem; }
+    footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #e3e6ea; font-size: 0.9rem; color: #555; }
+    footer a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Database MCP Server</h1>
+    <p>Let an AI query a Postgres database safely: it can read and explain your data,
+      but it can never change it, and every query it runs is on the record.</p>
+  </header>
+
+  <div class="actions">
+    {% if logged_in %}
+      <a class="button primary" href="/console/">Go to your dashboard</a>
+    {% else %}
+      <a class="button primary" href="/console/signup">Try it (no invite needed)</a>
+      <a class="button secondary" href="/console/login">Log in</a>
+    {% endif %}
+  </div>
+
+  <section class="demo" aria-label="Demo">
+    {% if demo_url %}
+      <img src="{{ demo_url }}"
+           alt="Demo: Claude answers a question about the database, a DELETE is refused by the server, and both appear in the console's audit trail." />
+    {% else %}
+      <div class="demo-placeholder">Demo coming soon</div>
+    {% endif %}
+  </section>
+
+  <ol class="steps">
+    <li><strong>Ask a question.</strong> Claude explores the schema, then runs one read-only query.</li>
+    <li><strong>Try to change data.</strong> The server refuses anything but a single <code>SELECT</code>.</li>
+    <li><strong>Check what ran.</strong> Every query, including refused ones, shows up in your audit trail.</li>
+  </ol>
+
+  <h2>How it stays safe</h2>
+  <ul class="safety">
+    <li><strong>Read-only in three layers:</strong> the SQL is parsed and checked, every transaction runs
+      <code>READ ONLY</code>, and the database login itself can't write.</li>
+    <li><strong>Cost-checked:</strong> expensive queries are rejected before they run, and results are capped.</li>
+    <li><strong>Limited:</strong> each API key has only the tools it needs, and per-hour rate limits.</li>
+    <li><strong>Audited:</strong> every attempt is logged before an answer is returned.</li>
+  </ul>
+
+  <h2>Use it from Claude Code</h2>
+  <p>Sign up for an API key, then install the plugin and enter the key when asked:</p>
+  <pre>/plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone</pre>
+
+  <footer>
+    <a href="https://github.com/NabilRobert/MCP-backbone">Source on GitHub</a>
+    <a href="https://github.com/NabilRobert/MCP-backbone/blob/main/BENCHMARK.md">Benchmark</a>
+    <a href="https://github.com/NabilRobert/MCP-backbone/blob/main/THREAT_MODEL.md">Threat model</a>
+  </footer>
+</body>
+</html>

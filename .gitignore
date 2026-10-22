@@ -9,3 +9,5 @@ node_modules/
 app/console/static/*.js.map
 .DS_Store
 # phase-*.md
+# Raw screen recordings for the demo GIF (large; the GIF itself is committed)
+docs/demo/raw/

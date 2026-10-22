@@ -9,6 +9,10 @@ a data-loss bug.
 the Claude Code plugin, and ask Claude about a sample database
 ([how](#use-it)).
 
+<!-- Demo GIF goes here once recorded:
+![Demo: Claude queries the database, a DELETE is refused, both appear in the audit trail](app/console/static/demo.gif)
+-->
+
 ## How it works
 
 ```mermaid
@@ -85,7 +89,7 @@ One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 restoring and rebuilding the production server:
 [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
-**Tests** (129, against real Postgres, run in CI on every push) need a
+**Tests** (130, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
 `CREATEROLE`, because the red-team tests create real throwaway roles:

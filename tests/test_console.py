@@ -2,6 +2,8 @@
 login, protected-route redirects, the dashboard, key management, and
 the audit JSON API the dashboard polls."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -152,14 +154,36 @@ async def test_key_rotate_then_revoke(
     assert "no active key" in revoked.text
 
 
-async def test_root_redirects_to_signup_or_dashboard(
+async def test_landing_page_offers_a_way_in(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
     client = TestClient(app, follow_redirects=False)
-    assert client.get("/").headers["location"] == "/console/signup"
+    visitor = client.get("/")
+    assert visitor.status_code == 200
+    assert 'href="/console/signup"' in visitor.text and 'href="/console/login"' in visitor.text
 
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
-    assert client.get("/").headers["location"] == "/console/"
+    member = client.get("/")
+    assert 'href="/console/"' in member.text
+    assert 'href="/console/signup"' not in member.text
+
+
+async def test_landing_page_shows_the_demo_once_it_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The demo spot shows a placeholder until a GIF is dropped in at
+    app/console/static/demo.gif, then the GIF itself."""
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "DEMO_FILE", tmp_path / "missing.gif")
+    assert "Demo coming soon" in TestClient(app).get("/").text
+
+    present = tmp_path / "demo.gif"
+    present.write_bytes(b"GIF89a")
+    monkeypatch.setattr(main_module, "DEMO_FILE", present)
+    page = TestClient(app).get("/").text
+    assert '<img src="/console/static/demo.gif"' in page
+    assert "Demo coming soon" not in page
 
 
 async def test_allowed_hosts_match_with_and_without_port() -> None:

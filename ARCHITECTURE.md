@@ -149,6 +149,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   `ConsoleCredential` (deliberately separate from `ApiKey` -- see
   app/auth/models.py -- so revoking a compromised API key never locks
   the operator out of viewing that workspace's own audit history).
+- **`app/main.py`'s landing page (`/`)** — the public front page: what this
+  is, the demo, and links to sign up or log in. The demo spot shows
+  `app/console/static/demo.gif` once that file exists, and a placeholder
+  until then.
 - **`app/console/routes.py`** — the web dashboard's pages: signup, login,
   logout, a dashboard showing the real audit trail (filterable by status
   and query text, with a 14-day chart of queries per day), and a keys
