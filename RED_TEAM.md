@@ -40,6 +40,12 @@ recognize as a safe builtin (not possible today, since recognized
 builtins are a fixed set, but stated as the boundary condition rather
 than assumed away).
 
+It also doesn't test prompt injection through database contents (data
+that tells the model to do something). That depends on the model and the
+client's other tools, not on this server's code, so a pass/fail test here
+would prove little. THREAT_MODEL.md T10 states what the server guarantees
+regardless and what it can't.
+
 ## Scale-up plan
 
 If/when this expands: more encoding/obfuscation variants, more

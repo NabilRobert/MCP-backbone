@@ -196,6 +196,54 @@ API key is accepted only in
 the `Authorization` header, never as a tool argument, so it never passes
 through the AI model's context or its transcripts.
 
+### T10: prompt injection through the data itself
+
+Everything the tools return goes into the AI model's context: rows from
+`run_query` and `sample_rows`, and table and column names from
+`list_tables` and `describe_table`. If any of that text contains
+instructions ("ignore your previous instructions and..."), the model may
+follow them. Nobody can plant such text *through* this server, since
+every path is read-only. So the realistic source is whoever controls the
+database's contents: the operator, for the demo database, or the user,
+for their own. The practical case is a user's own database holding
+untrusted text, such as customer messages, form submissions or scraped
+pages.
+
+**What this server guarantees no matter what the model is told:**
+
+- **No writes.** The validator, read-only transactions and, where
+  available, a read-only role (T1, T2) stop an injected "now delete..."
+  as surely as a direct one.
+- **No reach beyond the workspace.** The key travels in a header the
+  model never sees, so injected text can't make it reveal or swap
+  credentials. Every tool is scoped to the authenticated workspace (T6).
+- **No reach beyond the database.** The server's only tools are four
+  reads against one database, which passes the address guard (T7). It
+  has nothing that fetches URLs, sends messages or touches files, so an
+  injection can't use *this server* to send data anywhere.
+- **Bounded, and on the record.** Rate limits and the 200-row cap bound
+  how much an injected model can read, and every call it makes, including
+  rejected ones, is in the audit log.
+
+**What it cannot prevent:**
+
+- **Exfiltration through the client's other tools.** If the same Claude
+  session can also fetch URLs, send email or run shell commands, injected
+  instructions could make it pass data it read here to those tools. This
+  server never sees that happen. The control is on the client side: keep
+  outbound tools on approval (Claude Code's permission prompts) in
+  sessions that use this plugin, especially against a database holding
+  untrusted text.
+- **Wrong answers.** Injected text can make the model misreport what it
+  found. The audit log shows what was actually queried and returned,
+  which is how a misleading answer can be checked.
+
+**Partial mitigation, not relied on:** the plugin's skill tells Claude to
+treat everything the tools return as data, never as instructions, and to
+point out text that looks like instructions rather than act on it. Models
+follow such guidance most of the time, not always, which is why the
+guarantees above don't depend on it.
+
 ## What this does *not* defend against (stated honestly, not hand-waved)
 
 - **A compromised operator machine or server.** Secrets (the bookkeeping
@@ -216,6 +264,10 @@ through the AI model's context or its transcripts.
   and in total per day, but someone with many IP addresses can still use
   up the daily total. That locks out new demo signups for the day; it
   doesn't affect existing accounts.
+- **Prompt injection carried by database contents, acted on through the
+  client's other tools** (T10). The server bounds what an injected model
+  can do *here*; what it does with the rest of its tools is the client's
+  to control.
 - **A user's own database credentials being over-privileged.** Signup
   warns when the supplied login can write or is a superuser, but accepts
   it: it's their database. The app-level validator still blocks writes.

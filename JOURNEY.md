@@ -1476,3 +1476,18 @@ agent adding a `category_id` column next to the right category and total:
 exactly the case the lenient grader exists for, and the reason both scores
 are published. Both runs stay in `BENCHMARK.md` side by side, with what
 changed between them, rather than the better number replacing the worse.
+
+## 2026-10-22 (continued) — MIT license, and prompt injection on the record
+
+Checked against the original portfolio plan, Project 1 had two easy gaps
+left. The repo was public but had no license, which legally makes it
+"all rights reserved", not open source; it's now MIT. And the plan says
+"prompt-injection safe", which the threat model never actually
+addressed. T10 now does, honestly. The server can't stop a model being
+talked into something by text stored in a database, but it bounds what
+that model can do *here*: no writes, nothing outside its own workspace
+and database, every call rate-limited and audited, and no tool that sends
+data anywhere. What it can't control is the client's other tools, so
+that's stated as the client's job, not claimed as covered. The plugin's
+skill now tells Claude to treat results as data, never instructions,
+recorded as a partial guard that nothing depends on.
