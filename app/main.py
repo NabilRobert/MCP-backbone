@@ -6,19 +6,21 @@ other talks to AI clients over the MCP protocol -- they just now share
 a single FastAPI app, mounted at different paths, instead of needing
 two separate processes to run and expose."""
 
+import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
+from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.console.routes import router as console_router
 from app.crypto import check_encryption_key
-from app.db import dispose_target_engines
+from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
 
 
@@ -113,8 +115,15 @@ async def root(request: Request) -> RedirectResponse:
     return RedirectResponse("/console/signup", status_code=307)
 
 
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    """A trivial endpoint that just confirms the server is up and
-    responding -- useful for monitoring/deployment tools to check."""
-    return {"status": "ok"}
+@app.get("/healthz", response_model=None)
+async def healthz() -> dict[str, str] | JSONResponse:
+    """For uptime monitors: 200 only if the server can actually reach its
+    bookkeeping database (every tool call needs it), 503 otherwise. A
+    check that only proves the process is up would stay green through a
+    database outage."""
+    try:
+        async with asyncio.timeout(3), SessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001 -- any failure to reach the database is "unhealthy"
+        return JSONResponse({"status": "unhealthy", "database": "unreachable"}, status_code=503)
+    return {"status": "ok", "database": "ok"}

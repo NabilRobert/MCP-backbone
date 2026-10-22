@@ -200,3 +200,24 @@ async def test_log_out_everywhere_revokes_other_sessions(
     # Logging in again works normally.
     phone.post("/console/login", data=credentials)
     assert phone.get("/console/").status_code == 200
+
+
+async def test_healthz_reports_database_reachability(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An uptime monitor needs a red signal when the server can't do its
+    job, not just when the process is down."""
+    client = TestClient(app)
+    healthy = client.get("/healthz")
+    assert healthy.status_code == 200
+    assert healthy.json() == {"status": "ok", "database": "ok"}
+
+    import app.main as main_module
+
+    def unreachable() -> None:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(main_module, "SessionLocal", unreachable)
+    down = client.get("/healthz")
+    assert down.status_code == 503
+    assert down.json()["database"] == "unreachable"
