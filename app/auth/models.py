@@ -64,6 +64,11 @@ class ConsoleCredential(Base):
     # creates a ConsoleCredential.
     username: Mapped[str] = mapped_column(unique=True)
     password_hash: Mapped[str]
+    # Stamped into every login's session cookie. A session whose stamp no
+    # longer matches is refused, so bumping this ("log out everywhere")
+    # revokes every existing session server-side, which a signed cookie
+    # alone can't do.
+    session_version: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 class RateLimitCounter(Base):
@@ -101,3 +106,16 @@ class InviteCode(Base):
     expires_at: Mapped[datetime | None]
     used_at: Mapped[datetime | None]
     used_by_workspace_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("workspaces.id"))
+
+
+class ThrottleEvent(Base):
+    """One counted event for a per-IP limit (app/console/throttle.py):
+    a failed login or signup, or a demo signup. `key` is a SHA-256 of the
+    client IP, never the IP itself, and rows are pruned after a day."""
+
+    __tablename__ = "throttle_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    bucket: Mapped[str]
+    key: Mapped[str] = mapped_column(index=True)
+    created_at: Mapped[datetime]

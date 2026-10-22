@@ -8,14 +8,13 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.models import InviteCode, Workspace
+from app.auth.models import InviteCode, ThrottleEvent, Workspace
 from app.auth.service import authenticate
 from app.auth.signup import create_invite
 from app.config import settings
-from app.console.throttle import login_limiter
 from app.db import engine
 from app.main import app
 from app.query import schema_cache
@@ -26,6 +25,11 @@ from app.query.service import QueryExecutionError, list_tables, run_query
 pytestmark = pytest.mark.asyncio
 
 STRONG_PASSWORD = "correct-horse-battery"
+
+
+async def _clear_throttle(session: AsyncSession) -> None:
+    await session.execute(delete(ThrottleEvent))
+    await session.commit()
 
 
 def _signup(client: TestClient, invite: str, username: str = "newuser", **extra: str):
@@ -329,7 +333,7 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
 
     # Untrusted peer: its X-Forwarded-For is ignored, so rotating it
     # doesn't reset the count.
-    login_limiter.reset()
+    await _clear_throttle(db_session)
     direct = behind_proxy("172.18.0.0/16")
     for i in range(settings.login_max_failures):
         direct.post("/console/login", data=wrong, headers={"X-Forwarded-For": f"198.51.100.{i}"})
@@ -371,9 +375,7 @@ async def test_demo_signup_cannot_bring_its_own_database(db_session: AsyncSessio
 async def test_demo_signups_are_capped_per_ip(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.console.throttle import demo_signup_limiter
-
-    monkeypatch.setattr(demo_signup_limiter, "max_events", 2)
+    monkeypatch.setattr(settings, "demo_signups_per_ip_per_day", 2)
     client = TestClient(app)
     assert _demo_signup(client, "demo-one").status_code == 200
     assert _demo_signup(client, "demo-two").status_code == 200
@@ -391,7 +393,7 @@ async def test_demo_signups_are_capped_per_day_overall(
 ) -> None:
     monkeypatch.setattr(settings, "demo_signups_per_day", 1)
     assert _demo_signup(TestClient(app), "demo-one").status_code == 200
-    login_limiter.reset()
+    await _clear_throttle(db_session)
 
     full = _demo_signup(TestClient(app), "demo-two")
     assert full.status_code == 400
@@ -448,3 +450,12 @@ async def test_default_target_is_exempt_from_the_private_address_guard(
     workspace = await authenticate(db_session, api_key)
 
     assert isinstance(await list_tables(db_session, workspace), list)
+
+
+async def test_throttle_stores_a_hash_not_the_ip(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    TestClient(app).post("/console/login", data={"username": "admin", "password": "wrong"})
+    keys = (await db_session.execute(select(ThrottleEvent.key))).scalars().all()
+    assert len(keys) == 1
+    assert "testclient" not in keys[0] and len(keys[0]) == 64  # SHA-256 hex

@@ -176,3 +176,27 @@ async def test_allowed_hosts_match_with_and_without_port() -> None:
     assert guard._validate_host("mcp.my.id:8443")  # pyright: ignore[reportPrivateUsage]
     assert not guard._validate_host("evil.example")  # pyright: ignore[reportPrivateUsage]
     assert guard._validate_origin("https://mcp.my.id")  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_log_out_everywhere_revokes_other_sessions(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    """A signed cookie can't be recalled by itself; the session_version
+    stamp lets "log out everywhere" end sessions on other browsers too."""
+    credentials = {"username": "admin", "password": "testpass"}
+    laptop = TestClient(app, follow_redirects=False)
+    phone = TestClient(app, follow_redirects=False)
+    laptop.post("/console/login", data=credentials)
+    phone.post("/console/login", data=credentials)
+    assert phone.get("/console/").status_code == 200
+
+    assert laptop.post("/console/sessions/revoke").status_code == 303
+
+    for browser in (laptop, phone):
+        after = browser.get("/console/")
+        assert after.status_code == 303
+        assert after.headers["location"] == "/console/login"
+
+    # Logging in again works normally.
+    phone.post("/console/login", data=credentials)
+    assert phone.get("/console/").status_code == 200

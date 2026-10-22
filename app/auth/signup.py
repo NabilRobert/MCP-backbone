@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import ApiKey, ConsoleCredential, InviteCode, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
 from app.config import settings
-from app.console.throttle import demo_signup_limiter
+from app.console import throttle
 from app.db import create_target_engine
 from app.query.models import DataSourceConnection
 from app.query.network_guard import UnsafeTargetError, ensure_public_target
@@ -172,7 +172,13 @@ async def _sign_up_demo(
     day."""
     if not settings.demo_signups_enabled:
         raise SignupError("Signup currently needs an invite code.")
-    if demo_signup_limiter.is_blocked(client_ip):
+    if await throttle.is_blocked(
+        session,
+        throttle.DEMO_SIGNUP,
+        client_ip,
+        settings.demo_signups_per_ip_per_day,
+        24 * 60 * 60,
+    ):
         raise SignupError("Too many demo accounts from your network today. Try again tomorrow.")
     created_today = (
         await session.execute(
@@ -199,7 +205,7 @@ async def _sign_up_demo(
         await session.rollback()
         raise
 
-    demo_signup_limiter.record(client_ip)
+    await throttle.record(session, throttle.DEMO_SIGNUP, client_ip)
     return SignupResult(workspace=workspace, api_key=api_key)
 
 

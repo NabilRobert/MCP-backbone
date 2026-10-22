@@ -153,6 +153,27 @@ capped per client IP and per day. Connecting your own database still needs
 an invite. A fully gated demo would have protected little and made the
 project impossible to try.
 
+### ADR-008: API keys over the MCP authorization flow (OAuth), for now
+**Context:** The MCP specification defines an OAuth 2.1 authorization flow
+for remote servers: the client discovers the server's authorization
+endpoint, the user logs in in a browser, and the client receives a token
+automatically. This server instead issues API keys that the user pastes
+into the Claude Code plugin once.
+**Decision:** Keep API keys. They're scoped to one workspace, stored only
+as hashes, revocable from the console, and sent only as an
+`Authorization` header (never through the model's context). Claude Code
+stores the plugin's key in the OS credential store.
+**Alternatives rejected (for now):** Implementing the OAuth flow means
+running an authorization server (dynamic client registration, PKCE,
+token issuance, refresh and revocation, consent screens): more security-
+critical code than the rest of the auth layer combined, for one gain,
+not having to copy a key once.
+**Revisit if:** users connect from several clients, keys start being
+shared or leaked, or the server needs to act on behalf of an external
+identity provider's accounts. The plugin and the `Authorization: Bearer`
+header would carry over unchanged; only how the token is obtained
+changes.
+
 ## Reversible vs. irreversible
 
 - **Cheap to change later:** console templating choice, UI styling, exact

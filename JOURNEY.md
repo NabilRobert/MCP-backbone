@@ -1412,3 +1412,37 @@ path: it resolves to Sumopod, passes the address guard, runs with
 `transaction_read_only = on`, has a `CREATE TEMP TABLE` refused by
 Postgres, and answers a real query. The one-off `.env` backups that held
 the Sumopod URL in plain text were deleted once it was stored encrypted.
+
+## 2026-10-22 (continued) — Acting on a senior-engineer review
+
+A deliberately critical review of the whole project produced eight
+items. Each is fixed in its own commit, with a test where one could prove
+anything.
+
+- **`run_query` had no result-size cap.** The cost check bounds how
+  expensive a query is, not how big its result is: `select * from rental`
+  is cheap and 16,000 rows. Results are now streamed through a
+  server-side cursor and cut off at 200 rows (configurable), with
+  `truncated: true` and a note, so a huge result is never even loaded
+  into memory.
+- **The test suite could wipe a real database.** It drops every table
+  after each test and used `APP_DATABASE_URL` directly. On the laptop that
+  had been the dev database all along, which is why the local bookkeeping
+  tables kept vanishing. It now uses `APP_TEST_DATABASE_URL` and exits
+  before touching anything unless the database name contains "test".
+- **A new connection on every tool call.** Now one small pooled engine
+  per target, per event loop: about 680 ms for the first call to Sumopod,
+  about 290 ms after that. While there, `SET statement_timeout` became
+  `SET LOCAL`. The "leak" this was meant to fix turned out not to exist:
+  every target transaction ends in a rollback, which undoes a plain SET
+  too. A test written to prove the leak passed either way, so it was
+  deleted rather than kept as false evidence.
+- **An applied migration had been edited.** `e8b2a6f1c3d9` is restored to
+  exactly what ran on the VPS, and the driver-prefix fix now lives in a
+  new migration. Replayed on a scratch database, it reproduces the VPS
+  miss and then fixes it.
+- **In-memory limits and unrevocable sessions.** Login lockouts and demo
+  caps now live in the database (hashed IPs, pruned after a day), so a
+  restart doesn't reset them. Console sessions carry a per-login version,
+  so "log out everywhere" works server-side. OAuth is recorded as a
+  deliberate deferral (ADR-008), not an oversight.

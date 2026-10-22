@@ -151,8 +151,8 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   workspace's API key.
 - **`app/console/throttle.py`** — per-IP limits: locks out a client IP
   after repeated failed logins or signups, and caps demo signups per IP
-  per day. In memory, since the server is a single
-  process; see its docstring for what that costs.
+  per day. Stored in the database (`ThrottleEvent`, hashed IPs, pruned
+  after a day), so they survive restarts.
 - **`migrations/`** — Alembic's job: turning the Python model
   definitions above into actual `CREATE TABLE` statements run against
   Postgres, and tracking that history so the database schema can be

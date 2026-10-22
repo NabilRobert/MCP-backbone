@@ -22,4 +22,12 @@
       onsubmit="return confirm('Issue a new key? This revokes the current one immediately.');">
   <button type="submit">{{ "Issue a new key" if active_key else "Issue a key" }}</button>
 </form>
+
+<h2>Console sessions</h2>
+<p>Signed in somewhere you shouldn't be? This logs out every browser signed in to
+  this console, including this one.</p>
+<form class="inline" method="post" action="/console/sessions/revoke"
+      onsubmit="return confirm('Log out every browser signed in to this console?');">
+  <button type="submit">Log out everywhere</button>
+</form>
 {% endblock %}

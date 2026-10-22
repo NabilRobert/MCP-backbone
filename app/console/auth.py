@@ -40,12 +40,20 @@ async def verify_console_login(
     return await session.get(Workspace, credential.workspace_id)
 
 
-def log_in(request: Request, workspace: Workspace) -> None:
-    """Remembers which workspace this browser is logged in as, using a
-    signed cookie (Starlette's SessionMiddleware) -- not a database
-    table, since a console login session is exactly the kind of small,
-    short-lived state a cookie is meant for."""
+async def _credential_for(session: AsyncSession, workspace_id: object) -> ConsoleCredential | None:
+    result = await session.execute(
+        select(ConsoleCredential).where(ConsoleCredential.workspace_id == workspace_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def log_in(request: Request, session: AsyncSession, workspace: Workspace) -> None:
+    """Remembers which workspace this browser is logged in as, in a
+    signed cookie (Starlette's SessionMiddleware), stamped with the
+    login's current session_version so it can be revoked later."""
+    credential = await _credential_for(session, workspace.id)
     request.session["workspace_id"] = str(workspace.id)
+    request.session["session_version"] = credential.session_version if credential else 0
 
 
 def log_out(request: Request) -> None:
@@ -59,4 +67,18 @@ async def get_logged_in_workspace(request: Request, session: AsyncSession) -> Wo
     workspace_id = request.session.get("workspace_id")
     if workspace_id is None:
         return None
+    credential = await _credential_for(session, workspace_id)
+    if credential is None or request.session.get("session_version") != credential.session_version:
+        # Revoked by "log out everywhere" (or the login no longer exists).
+        request.session.clear()
+        return None
     return await session.get(Workspace, workspace_id)
+
+
+async def revoke_all_sessions(session: AsyncSession, workspace: Workspace) -> None:
+    """Invalidates every console session for this workspace, on every
+    browser, including the current one."""
+    credential = await _credential_for(session, workspace.id)
+    if credential is not None:
+        credential.session_version += 1
+        await session.commit()
