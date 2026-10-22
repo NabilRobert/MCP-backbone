@@ -9,9 +9,12 @@ a data-loss bug.
 the Claude Code plugin, and ask Claude about a sample database
 ([how](#use-it)).
 
-<!-- Demo GIF goes here once recorded:
-![Demo: Claude queries the database, a DELETE is refused, both appear in the audit trail](app/console/static/demo.gif)
--->
+| 1 · Ask a question | 2 · Try to change data |
+|---|---|
+| ![Claude explores the schema, then answers with one read-only query](app/console/static/demo/step1.gif) | ![The server refuses a DELETE: only SELECT statements are allowed](app/console/static/demo/step2.gif) |
+
+Every query, including the refused one, then shows up in the console's
+[audit trail](app/console/static/demo/step3.png).
 
 ## How it works
 

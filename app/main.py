@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -89,19 +90,74 @@ app.mount("/console/static", StaticFiles(directory=STATIC_DIR), name="console-st
 app.mount("/mcp", mcp_app)
 
 
-# Drop a GIF here and the landing page shows it; until then, a placeholder.
-DEMO_FILE = STATIC_DIR / "demo.gif"
+# The landing page's three demo steps. Each shows its file from DEMO_DIR
+# once it exists (with an optional still for prefers-reduced-motion), and a
+# same-sized placeholder until then. Width/height reserve the space so the
+# page doesn't jump while a GIF loads.
+DEMO_DIR = STATIC_DIR / "demo"
+DEMO_STEPS = [
+    {
+        "title": "Ask a question.",
+        "text": "Claude explores the schema, then runs one read-only query.",
+        "file": "step1.gif",
+        "still": "step1-still.png",
+        "width": 1000,
+        "height": 644,
+        "alt": "Claude Code loads the query-database skill, calls list_tables and "
+        "describe_table, then answers with the three most rented films.",
+    },
+    {
+        "title": "Try to change data.",
+        "text": "The server refuses anything but a single SELECT.",
+        "file": "step2.gif",
+        "still": "step2-still.png",
+        "width": 1000,
+        "height": 439,
+        "alt": "Asked to run DELETE FROM rental, the server rejects it: only SELECT "
+        "statements are allowed, so nothing was deleted.",
+    },
+    {
+        "title": "Check what ran.",
+        "text": "Every query, including refused ones, shows up in your audit trail.",
+        "file": "step3.png",
+        "still": None,
+        "width": 1000,
+        "height": 613,
+        "alt": "The console's audit trail: the refused DELETE in red with its reason, "
+        "the successful query with its cost, and a 14-day chart.",
+    },
+]
+
+
+def _demo_steps() -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for step in DEMO_STEPS:
+        present = (DEMO_DIR / str(step["file"])).exists()
+        still = step["still"]
+        steps.append(
+            {
+                **step,
+                "src": f"/console/static/demo/{step['file']}" if present else None,
+                "still": f"/console/static/demo/{still}"
+                if present and still and (DEMO_DIR / str(still)).exists()
+                else None,
+            }
+        )
+    return steps
 
 
 @app.get("/", include_in_schema=False)
 async def landing(request: Request):
     """The public front page: what this is, the demo, and a way in."""
+    steps = _demo_steps()
     return templates.TemplateResponse(
         request,
         "landing.html",
         {
             "logged_in": bool(request.session.get("workspace_id")),
-            "demo_url": "/console/static/demo.gif" if DEMO_FILE.exists() else None,
+            "steps": steps,
+            # A still image makes the better link preview; the dashboard is ideal.
+            "og_image": steps[-1]["src"],
             "base_url": str(request.base_url).rstrip("/"),
         },
     )

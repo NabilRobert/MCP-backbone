@@ -150,9 +150,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   app/auth/models.py -- so revoking a compromised API key never locks
   the operator out of viewing that workspace's own audit history).
 - **`app/main.py`'s landing page (`/`)** — the public front page: what this
-  is, the demo, and links to sign up or log in. The demo spot shows
-  `app/console/static/demo.gif` once that file exists, and a placeholder
-  until then.
+  is, a three-step demo, and links to sign up or log in. Each step shows its
+  file from `app/console/static/demo/` (two GIFs and a dashboard
+  screenshot, with still images for reduced-motion users) once it exists,
+  and a placeholder until then.
 - **`app/console/routes.py`** — the web dashboard's pages: signup, login,
   logout, a dashboard showing the real audit trail (filterable by status
   and query text, with a 14-day chart of queries per day), and a keys

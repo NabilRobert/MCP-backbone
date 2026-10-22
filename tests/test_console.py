@@ -168,22 +168,29 @@ async def test_landing_page_offers_a_way_in(
     assert 'href="/console/signup"' not in member.text
 
 
-async def test_landing_page_shows_the_demo_once_it_exists(
+async def test_landing_page_shows_each_demo_step_once_its_file_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The demo spot shows a placeholder until a GIF is dropped in at
-    app/console/static/demo.gif, then the GIF itself."""
+    """Each demo step shows a placeholder until its file is in
+    app/console/static/demo/, then the file (with a reduced-motion still
+    when one exists). The dashboard image doubles as the link preview."""
     import app.main as main_module
 
-    monkeypatch.setattr(main_module, "DEMO_FILE", tmp_path / "missing.gif")
-    assert "Demo coming soon" in TestClient(app).get("/").text
+    monkeypatch.setattr(main_module, "DEMO_DIR", tmp_path)
+    empty = TestClient(app).get("/").text
+    assert empty.count("Demo coming soon") == 3
+    assert "og:image" not in empty
 
-    present = tmp_path / "demo.gif"
-    present.write_bytes(b"GIF89a")
-    monkeypatch.setattr(main_module, "DEMO_FILE", present)
+    for name in ("step1.gif", "step1-still.png", "step3.png"):
+        (tmp_path / name).write_bytes(b"x")
     page = TestClient(app).get("/").text
-    assert '<img src="/console/static/demo.gif"' in page
-    assert "Demo coming soon" not in page
+    assert page.count("Demo coming soon") == 1  # step 2 still missing
+    assert '<img src="/console/static/demo/step1.gif"' in page
+    assert (
+        'srcset="/console/static/demo/step1-still.png" media="(prefers-reduced-motion: reduce)"'
+        in page
+    )
+    assert 'og:image" content="http://testserver/console/static/demo/step3.png"' in page
 
 
 async def test_allowed_hosts_match_with_and_without_port() -> None:
