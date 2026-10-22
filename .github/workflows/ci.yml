@@ -32,7 +32,7 @@ jobs:
       # repoint this at a restricted, shared-tenant managed host, even
       # one with full read/write access, or those tests fail with
       # "permission denied to drop role". See README.md's
-      # "APP_DATABASE_URL privilege requirement" section.
+      # "Run it yourself" section.
       APP_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
       APP_TARGET_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
 

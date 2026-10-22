@@ -1,286 +1,121 @@
 # Database MCP Server
 
-A standalone, read-only database MCP server that lets an AI client explore
-a database's schema and run safe, read-only SQL queries against it — with
-every attempt validated, cost-checked, and logged. Built to be small enough
-to read end to end, not as a piece of a larger platform.
+An MCP server that lets an AI model explore a Postgres database and query
+it, safely. Every query is parsed, cost-checked, run read-only and logged,
+and the database itself refuses writes, so a validator bug doesn't become
+a data-loss bug.
 
-**Try it:** sign up at **https://mcp.my.id** (no invite needed for the
-demo), install the Claude Code plugin, and ask Claude about a sample
-database. Steps under [How to use](#how-to-use).
+**Try it:** sign up at **https://mcp.my.id** (no invite needed), install
+the Claude Code plugin, and ask Claude about a sample database
+([how](#use-it)).
 
-A guided tour of the codebase -- what each file does and why, following
-how a real request actually flows through it -- is in
-[ARCHITECTURE.md](ARCHITECTURE.md). Start there if you're new to this repo.
+## How it works
 
-## Planning
+```mermaid
+flowchart LR
+    C[Claude Code<br/>+ plugin] -->|HTTPS, Bearer key| P[Caddy<br/>mcp.my.id]
+    P --> S[MCP server<br/>FastAPI + uvicorn]
+    S --> A{auth +<br/>rate limit}
+    A --> V[validate SQL<br/>sqlglot AST]
+    V --> K[cost check<br/>EXPLAIN]
+    K --> T[(target DB<br/>READ ONLY txn,<br/>read-only role)]
+    S --> B[(bookkeeping DB<br/>keys, audit log)]
+    U[Browser] --> S
+```
 
-The full phase-by-phase planning trail (problem, requirements, domain model,
-flows/failures, architecture/ADRs, risks/skeleton, sliced work plan) lives
-alongside this README:
+A query has to pass every layer, and each layer assumes the one before it
+might fail:
 
-- [phase-1-problem-brief.md](phase-1-problem-brief.md)
-- [phase-2-requirements-constraints.md](phase-2-requirements-constraints.md)
-- [phase-3-domain-model.md](phase-3-domain-model.md)
-- [phase-4-flows-failures.md](phase-4-flows-failures.md)
-- [phase-5-architecture-decisions.md](phase-5-architecture-decisions.md)
-- [phase-6-risks-skeleton.md](phase-6-risks-skeleton.md)
-- [phase-7-slices-plan.md](phase-7-slices-plan.md)
+1. **Auth:** a workspace API key in the `Authorization` header, stored only
+   as a hash, revocable from the console. Per-workspace rate limits.
+2. **Validation:** exactly one `SELECT`. The whole syntax tree is checked for
+   hidden writes (a write inside a CTE, `SELECT INTO`), and only built-in
+   functions are allowed.
+3. **Cost check:** `EXPLAIN` estimates the cost before anything runs, and
+   expensive queries are rejected.
+4. **Execution limits:** a statement timeout, and results capped at 200 rows.
+5. **The database itself:** every transaction is `READ ONLY`, and where
+   possible the login is a read-only role too. Each covers a gap the other
+   has (see [THREAT_MODEL.md](THREAT_MODEL.md)).
+6. **Audit:** every attempt, including rejected ones, is logged before a
+   result is returned. A web console shows the log live.
 
-What this server defends against, how, and what it doesn't is in
-[THREAT_MODEL.md](THREAT_MODEL.md). The adversarial test suite proving
-those defenses, with published pass/fail results, is
-[RED_TEAM.md](RED_TEAM.md).
+Proven by an adversarial suite that sends writes straight to the database,
+bypassing the validator: [RED_TEAM.md](RED_TEAM.md).
 
-The day-by-day build log — what broke, what surprised me, why decisions
-landed where they did — is in [JOURNEY.md](JOURNEY.md).
+## Use it
 
-## Status
+1. **Sign up** at https://mcp.my.id with a username and a password of 12+
+   characters. You get the demo database (Pagila, a DVD-rental store).
+   To query **your own Postgres** instead, open "Connect your own database"
+   and enter an invite code and its connection URL (stored encrypted; a
+   read-only login is recommended).
+2. **Copy your API key.** It's shown once. Issue a new one any time from
+   the console's Keys page.
+3. **Install the plugin** in Claude Code, and enter the key when asked:
+   ```
+   /plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
+   ```
+4. **Ask.** For example, "which film category has the most films?". Every
+   query shows up on your console's dashboard.
 
-**Slices A–E** built. Auth (issuance + revocation), rate limiting, and
-all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
-`run_query`) work end to end through the real MCP protocol -- verified
-via an in-memory client/server session, not just the SDK's raise-on-error
-convenience method, which caught a real bug in how tool errors reached
-the model. 114 passing tests against a real Postgres instance, CI
-running on every push.
+Per workspace, per hour: 5 queries and 30 row samples; listing and
+describing tables is free. Demo signups are capped per network and per day.
 
-**The MCP server can now actually be reached over a network** --
-mounted at `/mcp` on the same FastAPI app as the console (one process,
-one port), using the Streamable HTTP transport. Authentication now
-also accepts a real `Authorization: Bearer <key>` header, in addition
-to (not instead of) the existing `api_key` tool argument, so a real
-HTTP client can authenticate at the connection level instead of
-needing a custom wrapper. Verified three ways: the pre-existing
-in-memory protocol test, a new test against the actual mounted route
-using a real HTTP header and no `api_key` argument at all, and a real
-`uvicorn` process hit over an actual TCP socket. See JOURNEY.md for
-four real bugs (wrong lifespan, a double-mounted path, DNS-rebinding
-protection, an unrelated stray process squatting the first port tried)
-each found only by actually running it.
+## Run it yourself
 
-**Deployed and live on a real VPS, behind a real domain** -- a real
-Claude Code session, running on a laptop, successfully calling this
-server's tools over the open internet against the real Pagila
-database, over HTTPS (`https://mcp.my.id/mcp/`, a Let's Encrypt
-certificate that renews itself). Runs under a systemd unit
-(`mcp-backbone`), not a manually tracked background process; the unit,
-cert-renewal hook, backup script and cron line all live in `deploy/`
-so the server can be rebuilt from git. Getting there surfaced a genuine security
-issue worth being upfront about, not just a bug: the bookkeeping
-database and the target database were briefly the same database on
-first deploy, meaning an AI client could in principle have read API
-key hashes and the full audit log through `run_query`. Caught and
-fixed the same day, before anyone but the one real workspace ever used
-it -- bookkeeping now lives on a separate, local Postgres instance on
-the VPS itself. Full account in JOURNEY.md, including the two more
-real bugs (a target connection URL silently resolving to an
-uninstalled database driver; a duplicate console username crashing
-every login attempt) found getting the first real tool call to
-actually succeed.
+```bash
+uv sync
+cp .env.example .env            # fill in; APP_CONNECTION_ENCRYPTION_KEY is required
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+```
 
-**Open demo signup, invites for your own database.** Anyone can sign
-up for a workspace (key, audit log, rate limits) on the demo database.
-Connecting your own database needs an invite code, because that's the
-part with real risk: it makes the server connect to a host you chose
-and store your database password. Letting users register their
-own database meant closing the gaps that opens: connection URLs are
-encrypted at rest, an address guard stops a URL from pointing the server
-at its own internals, `sample_rows` is now audited and rate-limited, and
-console logins are throttled. See "How to use" below, ADR-007, and
-THREAT_MODEL.md T7-T9.
+One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
+`/healthz`. Invite someone with
+`python -m scripts.create_invite --note "alice"`. Deploying, monitoring,
+restoring and rebuilding the production server:
+[deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
-**Writes are refused by the database too, not only by the validator,
-whether or not a read-only role can be made.** The live server queries
-two databases. The public demo (Pagila) runs on the VPS's own Postgres
-behind a real read-only role. A second workspace queries an external
-managed Postgres (Sumopod) that can't create roles at all. Both get
-`READ ONLY` transactions, so Postgres refuses writes either way,
-including a `SECURITY DEFINER` write that a read-only role alone lets
-through. Verified on the live server for both databases. See
-THREAT_MODEL.md T1/T2 and RED_TEAM.md.
+**Tests** (119, against real Postgres, run in CI on every push) need a
+disposable database. The suite drops every table after each test and
+refuses to run unless the database name contains `test`. It also needs
+`CREATEROLE`, because the red-team tests create real throwaway roles:
 
-**Slice E (benchmark) now run for real -- 10/10 (100%)**:
-`scripts/run_benchmark.py` runs a PydanticAI agent (`gpt-5-mini` via
-Sumopod) against this server as a real MCP client, grading by
-execution accuracy against ten hand-written questions over a
-synthetic demo dataset (`scripts/load_demo_dataset.py`). Took three
-rounds of fixing real bugs the previous attempt surfaced, not three
-rounds of guessing: a per-workspace rate limit sized for occasional
-use, not an automated eval loop; a Decimal-vs-string type mismatch
-between the agent's MCP-serialized answer and the ground truth's raw
-DB value that failed every numeric answer regardless of correctness;
-and a grading methodology with no tolerance for an agent rounding a
-number for readability or adding one genuinely informative extra
-column. See JOURNEY.md for the full progression (30% -> 70% -> 100%)
-and exactly what each fix changed.
+```bash
+docker run -d --name jarvis-mcp-test-db -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=test -p 55432:5432 postgres:16-alpine
+# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
+uv run pytest
+```
 
-**Slice F (red-team suite) done** -- 16 adversarial tests against the
-safety layer, including genuine defense-in-depth against a real
-provisioned read-only role, not just the app-level validator. See
-[RED_TEAM.md](RED_TEAM.md) for the full catalog and results.
-
-**Slice G (web console) done** -- login (a separate credential from the
-API key, so revoking a compromised key never locks you out of the
-audit history), a dashboard polling the real audit log every 5s, and a
-keys page that can rotate or revoke the workspace's key. Verified
-through FastAPI's `TestClient` hitting the actual HTTP layer (login,
-redirects, sessions, forms, the real-data audit API) -- see JOURNEY.md
-for a real environment limit hit trying to also verify it visually in
-a browser, and why the TestClient coverage made that non-blocking.
-
-All seven slices from `phase-7-slices-plan.md` are now built.
-
-**Pagila, a richer dataset.** `scripts/load_demo_dataset.py`'s
-hand-written rows are enough to exercise the code paths but too thin
-to demo convincingly or to calibrate `APP_COST_THRESHOLD` against.
-`scripts/load_pagila_dataset.py` loads [Pagila](https://github.com/devrimgunduz/pagila)
-instead -- a real, widely-known public Postgres sample database (a
-DVD-rental store, 16+ tables, ~1,000 films, ~50,000 rentals) -- as an
-optional, more credible alternative target. See JOURNEY.md for the
-version-compatibility bugs real runs against a live Postgres 16
-instance turned up getting it working.
+The console's compiled JavaScript is committed (the server needs no Node);
+CI fails if it drifts from `static-src/main.ts`.
 
 ## Layout
 
 ```
 app/
-  auth/       workspace, api keys, console credentials, rate limiting
-  query/      data source connections, validation+execution, audit records
-  benchmark/  text-to-SQL eval cases and results
-  console/    server-rendered web console (Jinja2 + TS)
-  mcp/        the MCP protocol layer (thin adapter, no business logic)
-plugin/       the Claude Code plugin (MCP registration + query-database skill)
-static-src/   TypeScript source for the console, compiled to app/console/static
+  auth/       workspaces, API keys, console logins, signup, rate limits
+  query/      validation, cost check, execution, address guard, audit log
+  console/    server-rendered web console (Jinja2 + a little TypeScript)
+  mcp/        the MCP tools: a thin adapter, no business logic
+  benchmark/  text-to-SQL eval cases and grading
+plugin/       the Claude Code plugin (MCP registration + query skill)
+deploy/       systemd unit, Caddy block, firewall, backups, runbook
+scripts/      operator CLIs: invites, seeding, datasets, benchmark
 ```
 
-## Running (once dependencies are installed)
+## More
 
-```
-uv sync
-cp .env.example .env   # fill in real values
-uv run alembic upgrade head   # creates this project's own bookkeeping tables
-uv run uvicorn app.main:app --reload
-```
-
-This single process now serves both the console (`/console/...`) and
-the MCP server (`/mcp`) -- see the Status section above. `--reload` is
-for local development only (single process, restarts on every file
-change); a real deployment needs a proper process manager and should
-drop that flag.
-
-The console's compiled JavaScript (`app/console/static/main.js`) is
-committed, so running or deploying the server needs no Node at all.
-Only if you edit `static-src/main.ts`, rebuild and commit both files:
-
-```
-cd static-src && npm ci && npm run build
-```
-
-CI rebuilds it on every push and fails if the committed copy doesn't
-match, so the two can't drift apart.
-
-## How to use
-
-### As a user: ask Claude about a database
-
-1. **Sign up** at `https://<server>` (this project's own server is
-   https://mcp.my.id). Pick a username and a password of at least 12
-   characters. That's all the demo needs: you get the server's sample
-   database (Pagila, a DVD-rental store).
-   - **Your own database instead (invite only):** open "Connect your own
-     database", enter the invite code from whoever runs the server, and
-     paste your Postgres connection URL
-     (`postgresql://user:password@host:5432/dbname`). It must be reachable
-     from the internet, and a read-only login is strongly recommended:
-     signup warns you if the login can write. The URL is stored encrypted.
-2. **Copy your API key.** The page after signup shows it once. Lost it?
-   Log into the console and issue a new one on the **Keys** page; the old
-   one stops working immediately.
-3. **Install the plugin** in Claude Code:
-
-   ```
-   /plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
-   ```
-
-   When asked, enter the server URL (`https://<server>/mcp/`; the default is
-   this project's own server) and your API key. The key goes to your OS
-   credential store, not a settings file.
-4. **Ask.** For example: "which film category has the most films?" Claude
-   looks at the schema, writes one read-only query and answers. The
-   plugin's `query-database` skill tells it how to use the tools well, such
-   as exploring before spending a query and how to react to a rejection.
-5. **Check what ran.** The console's **Dashboard** lists every query and
-   data sample against your workspace, including rejected ones.
-
-Limits per workspace, per hour by default: 5 `run_query` calls and 30
-`sample_rows` calls. Demo signups are capped at 3 per network and 50 in
-total per day. Listing and describing tables is unlimited. The
-server only ever runs a single read-only `SELECT`, and rejects anything
-estimated to be too expensive.
-
-### As the operator: run the server and invite people
-
-1. **Deploy and configure.** Copy `.env.example` to `.env` and fill it in.
-   `APP_CONNECTION_ENCRYPTION_KEY` is required: the server won't start
-   without it. Generate it with the command in `.env.example` and keep a copy
-   off the server. `APP_TARGET_DATABASE_URL` is the default database new
-   workspaces query. Then run `alembic upgrade head` and start the server
-   (see Running below, and `deploy/` for the systemd unit).
-2. **Invite someone who wants their own database.** Demo accounts need no
-   invite (turn them off with `APP_DEMO_SIGNUPS_ENABLED=false`). Each code is
-   single use and expires after 14 days by default:
-
-   ```
-   python -m scripts.create_invite --note "alice"
-   ```
-
-   Send them the code and the signup link.
-3. **Host the demo database yourself (recommended).** Anyone can sign up for
-   the demo, so its database should refuse writes on its own, not only through
-   the app's checks. `deploy/setup_demo_database.sh` builds Pagila on the
-   server's own Postgres with a read-only login, proves that login can't
-   write, and switches the app over.
-4. **Manage access.** Revoke a key from the console, or with
-   `scripts/revoke_key.py`. `scripts/seed_workspace.py` still creates a
-   workspace directly, without an invite.
-
-## Running tests: the `APP_DATABASE_URL` privilege requirement
-
-This isn't a local-vs-remote thing -- it's about privilege level.
-`APP_DATABASE_URL` (this project's own bookkeeping database) needs an
-account with `CREATEROLE`, wherever that database actually lives.
-Several tests (`tests/test_red_team.py`'s defense-in-depth suite in
-particular) provision a real, throwaway Postgres role via
-`scripts/provision_readonly_role.py` to prove the database itself
-blocks a write, not just the app's own validator -- deliberately, so
-that proof isn't faked.
-
-A *shared, restricted-tenant* host -- even one you otherwise have full
-read/write access to -- will fail those tests with `permission denied
-to drop role`, not because anything's broken, but because withholding
-`CREATEROLE` from ordinary accounts is exactly what that kind of
-hosting tier is supposed to do. A self-hosted remote Postgres (your
-own VPS, your own superuser) works just as well as a local one --
-what matters is control over the account, not where the machine is.
-CI's own Postgres service container (`.github/workflows/ci.yml`) is
-technically remote too (a fresh container on GitHub's runner), and it
-passes 100% because it connects as the default `postgres` superuser.
-
-For local dev, a disposable container is the easiest way to get that.
-Point `APP_TEST_DATABASE_URL` at it, not `APP_DATABASE_URL`: the suite drops
-every table in its database after each test, so it refuses to run unless
-the database name contains `test`.
-
-```
-docker run -d --name jarvis-mcp-test-db \
-  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test \
-  -p 55432:5432 postgres:16-alpine
-# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
-```
-
-`APP_TARGET_DATABASE_URL` (the database being *queried*, not this
-project's own) has no such requirement, and realistically *shouldn't*
-have it -- it's meant to model exactly the kind of restricted external
-database this project doesn't control, so it can keep pointing at a
-managed, multi-tenant host indefinitely.
+- [ARCHITECTURE.md](ARCHITECTURE.md): a guided tour of the code, following a
+  request through it. Start here.
+- [THREAT_MODEL.md](THREAT_MODEL.md): what it defends against, how, and
+  what it doesn't.
+- [RED_TEAM.md](RED_TEAM.md): the adversarial suite and its results,
+  including the limits it demonstrates.
+- [JOURNEY.md](JOURNEY.md): the build log. What broke, what was assumed
+  and turned out wrong, and why each decision landed where it did.
+- [phase-5-architecture-decisions.md](phase-5-architecture-decisions.md):
+  the ADRs. Phases [1](phase-1-problem-brief.md)–[7](phase-7-slices-plan.md)
+  are the full planning trail.
