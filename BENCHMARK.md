@@ -56,8 +56,9 @@ Both failures were investigated, not just counted:
   querying it already includes all 55 monthly partitions. But
   `list_tables` lists each partition as a table of its own, and the agent
   summed the parent *and* every partition, counting each payment twice.
-  Follow-up: `list_tables` should show partitioned tables once, not their
-  partitions.
+  Since fixed: `list_tables` now shows a partitioned table once and hides
+  its partitions (Pagila lists 15 tables instead of 70). This run predates
+  the fix.
 - **"Which film category has generated the most payment revenue?" (hard):
   a defect in the question, not the agent.** In this Pagila variant 964 of
   1,000 films belong to more than one category, so "revenue per category"

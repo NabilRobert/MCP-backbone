@@ -1462,3 +1462,10 @@ anything.
   Pagila variant most films have several categories, so "revenue per
   category" had two right answers. The question is fixed for future runs,
   and this run is reported as graded, not re-scored.
+
+Follow-up from the benchmark's payment failure: `list_tables` (and the
+schema data behind `describe_table` and `sample_rows`) now hides the
+partitions of a partitioned table, since querying the parent already
+includes them. Pagila goes from 70 listed tables to 15, which is what
+the dataset really has. That's a tool fix prompted by the benchmark, not
+a re-score: the published run stays as it was.

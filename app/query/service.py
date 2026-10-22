@@ -108,17 +108,32 @@ async def write_audit(
     await session.commit()
 
 
+def visible_table_names(sync_conn: Any) -> list[str]:
+    """Table names an AI client should see: every table in the current
+    schema except the partitions of a partitioned table. Querying the
+    partitioned parent already covers all of its partitions, so listing
+    them too invites double counting. Found by the benchmark: with
+    `payment` and its 55 monthly partitions all listed, an agent summed
+    the parent plus every partition and counted each payment twice."""
+    partitions = set(
+        sync_conn.execute(
+            text(
+                "SELECT c.relname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE c.relispartition AND n.nspname = current_schema()"
+            )
+        ).scalars()
+    )
+    inspector: Inspector = inspect(sync_conn)
+    return [name for name in inspector.get_table_names() if name not in partitions]
+
+
 async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
     """Connects to the workspace's real database just long enough to ask
     "what tables exist here?" and returns their names."""
     data_source = await get_data_source(session, workspace)
     async with get_target_engine(data_source.connection_url).connect() as conn:
-
-        def _get_table_names(sync_conn: Any) -> list[str]:
-            inspector: Inspector = inspect(sync_conn)
-            return inspector.get_table_names()
-
-        return await conn.run_sync(_get_table_names)
+        return await conn.run_sync(visible_table_names)
 
 
 async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> dict[str, Any]:
@@ -167,9 +182,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
                 conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
             )
         except QueryRejected as exc:
-            await write_audit(
-                session, workspace, data_source, sql, "rejected", None, exc.reason
-            )
+            await write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)
             return {"status": "rejected", "rows": [], "error": exc.reason}
         except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
             await write_audit(session, workspace, data_source, sql, "errored", None, str(exc))

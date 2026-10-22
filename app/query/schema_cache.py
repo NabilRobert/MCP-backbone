@@ -17,7 +17,12 @@ from app.auth.rate_limit import RateLimitExceeded, check_and_increment
 from app.config import settings
 from app.db import get_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
-from app.query.service import QueryExecutionError, get_data_source, write_audit
+from app.query.service import (
+    QueryExecutionError,
+    get_data_source,
+    visible_table_names,
+    write_audit,
+)
 
 # How long a saved copy of the schema stays "fresh" before we bother
 # asking the real database again.
@@ -37,7 +42,7 @@ async def _fetch_live(connection_url: str) -> dict[str, list[dict[str, str]]]:
                     {"name": col["name"], "type": str(col["type"])}
                     for col in inspector.get_columns(table)
                 ]
-                for table in inspector.get_table_names()
+                for table in visible_table_names(sync_conn)
             }
 
         return await conn.run_sync(_inspect)
