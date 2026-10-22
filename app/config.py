@@ -79,11 +79,8 @@ class Settings(BaseSettings):
     @field_validator("console_session_secret", mode="after")
     @classmethod
     def _fall_back_to_random_secret_if_blank(cls, value: str) -> str:
-        # Without this, APP_CONSOLE_SESSION_SECRET= (present in .env but
-        # left empty, e.g. straight from .env.example) would set this to
-        # an actual empty string instead of falling through to the
-        # random default -- confirmed by testing, not assumed. An empty
-        # signing key defeats the whole point of signing the cookie.
+        # APP_CONSOLE_SESSION_SECRET= (present but empty, as copied from
+        # .env.example) would otherwise be an empty signing key.
         return value if value else secrets.token_urlsafe(32)
 
 

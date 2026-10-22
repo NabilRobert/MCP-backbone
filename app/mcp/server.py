@@ -21,24 +21,12 @@ mcp = MCPServer("database-mcp")
 
 
 def _resolve_api_key(ctx: Context, api_key: str | None) -> str:
-    """Prefers a real HTTP client's "Authorization: Bearer <key>"
-    header over the explicit api_key argument below -- the header is
-    the standard way a remote MCP client authenticates, and it means
-    the AI model never has to be told to fill in a credential at all.
-    Falls back to the argument for stdio/in-memory transport, where
-    there's no HTTP request to carry a header on (ctx.headers is None
-    there) -- this is exactly what scripts/run_benchmark.py's own
-    key-injecting wrapper already relies on, so this stays working
-    unchanged for it. Checked case-insensitively by hand rather than
-    assuming a specific headers object's own case handling, since
-    ctx.headers is typed as a plain Mapping.
-
-    Over HTTP (ctx.headers is not None), ONLY the header is accepted.
-    A key passed as a tool argument travels through the AI model's own
-    context -- it lands in transcripts and the model can repeat it --
-    so a remote client must use the header, which the model never
-    sees. The argument stays for local transports, where there's no
-    header to use."""
+    """Over HTTP, the key must come in the `Authorization: Bearer` header
+    (matched case-insensitively; ctx.headers is a plain Mapping). A key
+    passed as a tool argument travels through the AI model's context and
+    transcripts, so it's refused there. Local transports (stdio,
+    in-memory, as the benchmark uses) have no headers (ctx.headers is
+    None) and keep using the api_key argument."""
     headers = ctx.headers
     if headers is not None:
         auth_header = next((v for k, v in headers.items() if k.lower() == "authorization"), None)

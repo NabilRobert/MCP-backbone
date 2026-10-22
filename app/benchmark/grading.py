@@ -15,21 +15,11 @@ _NUMERIC_TOLERANCE = Decimal("0.005")
 
 
 def _normalize_value(value: Any) -> Any:
-    """The "expected" side comes from a direct, in-process DB connection
-    (app/query/service.py's own row-to-dict conversion), so a NUMERIC
-    column arrives as a real Decimal. The "actual" side comes back from
-    a real AI agent through the actual MCP tool call -- the same JSON
-    round-trip a real client goes through -- and Decimal isn't a JSON
-    type, so it arrives as the string "387684.66" instead. Comparing
-    those directly (confirmed by actually running the benchmark: a
-    numerically-correct revenue answer was marked wrong for exactly this
-    reason) fails Decimal("387684.66") == "387684.66" every time, for
-    every numeric answer, regardless of whether the agent got it right.
-    Parsing anything that looks like a number into a Decimal on both
-    sides fixes that. A string that happens to look numeric but isn't
-    (a zip code, a SKU) would lose a meaningful distinction like a
-    leading zero here -- not a concern for this project's current eval
-    questions, but a real tradeoff if that ever changes."""
+    """Expected rows come straight from the database, so NUMERIC is a
+    Decimal; the agent's rows come through MCP's JSON, where it's the
+    string "387684.66". Without normalising both, every numeric answer
+    fails regardless of correctness. Tradeoff: a numeric-looking string
+    (a zip code with a leading zero) would lose that distinction."""
     if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
         return Decimal(str(value))
     if isinstance(value, str):

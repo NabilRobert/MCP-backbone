@@ -22,22 +22,14 @@ async def check_and_increment(
     window_seconds: int,
     bucket: str = "query",
 ) -> None:
-    """"Fixed-window" rate limiting, explained plainly: pick a time
-    window (e.g. one hour), count requests within it, and once the
-    window's time is up, start counting from zero again. This is
-    simpler than more precise alternatives (like a "sliding window"),
-    at the cost of being a bit bursty right at the edge of a window --
-    an acceptable tradeoff here, since this limit is a rough
-    cost-control placeholder, not a hard guarantee (Phase 4).
+    """Fixed-window rate limit: count requests per window, reset when the
+    window ends. `bucket` selects the allowance ("query" for run_query,
+    "sample" for sample_rows), each with its own counter.
 
-    Also approximate on purpose for a second reason: two requests
-    arriving at the exact same instant could both read the counter
-    before either writes it back, letting the count run slightly over
-    the limit. Fixing that needs database-level locking, which isn't
-    worth the complexity at this project's scale.
-
-    `bucket` picks which allowance to count against ("query" for
-    run_query, "sample" for sample_rows), each with its own counter."""
+    Approximate by design: bursty at a window's edge, and two requests at
+    the same instant can both read the counter before either writes it,
+    slightly overshooting. It's a cost-control limit, not a security
+    boundary, so neither is worth database-level locking."""
     now = datetime.datetime.now(datetime.UTC)
     result = await session.execute(
         select(RateLimitCounter).where(

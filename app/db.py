@@ -23,23 +23,12 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
-# NullPool means "don't keep connections open and reuse them, open a
-# fresh one each time instead." Normally that would hurt performance,
-# but at this project's small scale it costs nothing, and it sidesteps
-# a real bug that shows up otherwise: a reused connection can end up
-# tied to a different async "event loop" than the one currently running
-# (this bit a test run during development), which pooling would have
-# caused but NullPool avoids entirely.
-#
-# statement_cache_size=0 disables asyncpg's own server-side prepared
-# statement cache -- necessary if APP_DATABASE_URL ever points through
-# PgBouncer in "transaction" or "statement" pooling mode (confirmed by
-# actually hitting it: a real deploy pointed this at a PgBouncer-fronted
-# Postgres and every query failed with "prepared statement ... already
-# exists", exactly the failure mode asyncpg's own error message
-# documents for this situation). Plain Postgres, no pooler in front,
-# works identically either way -- this isn't a tradeoff being made, it
-# just makes the one case that was actually broken work too.
+# The bookkeeping database. NullPool (a fresh connection each time):
+# negligible cost at this scale, and a pooled connection can end up bound
+# to a different event loop than the one running (tests use one loop
+# each). statement_cache_size=0: asyncpg's prepared-statement cache breaks
+# behind PgBouncer's transaction pooling ("prepared statement already
+# exists"); plain Postgres works the same either way.
 engine = create_async_engine(
     settings.database_url,
     poolclass=NullPool,
@@ -52,41 +41,22 @@ _POSTGRES_SCHEME = re.compile(r"^postgresql(\+\w+)?://")
 
 
 def create_target_engine(connection_url: str, *, pooled: bool = False) -> AsyncEngine:
-    """Every place that connects to a workspace's real TARGET database
-    (app/query/service.py, app/query/schema_cache.py -- never this
-    project's own bookkeeping one, that's the module-level `engine`
-    above) needs the exact same statement_cache_size=0 fix, for the
-    exact same reason: a target is just as likely to be PgBouncer-
-    fronted as the bookkeeping database was. Confirmed directly, not
-    assumed from the bookkeeping fix alone -- the real deployed target
-    database hit the identical DuplicatePreparedStatementError once a
-    real client actually called a tool against it. One helper here
-    instead of repeating connect_args in four separate call sites.
+    """An engine for a workspace's TARGET database (never the bookkeeping
+    one above). Use get_target_engine() below for queries; call this
+    directly only for a one-off connection, like checking a URL at signup.
 
-    Also forces the +asyncpg driver regardless of what scheme a stored
-    connection_url actually has. This project has only ever tested
-    asyncpg; a bare "postgresql://" (no driver suffix at all -- exactly
-    what a workspace gets if its connection_url is copied straight from
-    APP_TARGET_DATABASE_URL without converting the scheme first, a real
-    mistake made more than once while setting this project up)
-    silently resolves to a DIFFERENT driver (psycopg) under this
-    SQLAlchemy version, which isn't even installed -- confirmed by
-    actually hitting ModuleNotFoundError: No module named 'psycopg' on
-    a real deployment's first real tool call, not a hypothetical.
-
-    And every transaction on a target connection is READ ONLY
-    (postgresql_readonly: each one starts with BEGIN READ ONLY, so it's
-    transaction-scoped and safe behind a transaction-pooling PgBouncer).
-    Postgres itself then refuses any write the app's validator might
-    miss -- a CTE-hidden INSERT, SELECT INTO, CREATE (even TEMP), and
-    a write inside a SECURITY DEFINER function, which a read-only role
-    can't stop -- and a query can't switch it off mid-statement. Unlike
-    a read-only role it needs no CREATE ROLE permission, so it covers
-    targets where one can't be made (a managed host like Sumopod, or a
-    user's own database with a writable login). Its limit: a separate
-    SET TRANSACTION READ WRITE statement, sent before any query, could
-    undo it -- which needs a way past the validator's single-SELECT
-    rule first. Where a read-only role CAN be made, use both."""
+    Every target connection gets:
+    - statement_cache_size=0, for the same PgBouncer reason as above.
+    - the +asyncpg driver, whatever the URL says: a bare "postgresql://"
+      resolves to psycopg under this SQLAlchemy, which isn't installed.
+    - READ ONLY transactions (postgresql_readonly, i.e. BEGIN READ ONLY,
+      transaction-scoped so PgBouncer-safe). Postgres then refuses writes
+      the validator might miss, including inside a SECURITY DEFINER
+      function, and needs no CREATE ROLE, so it covers targets where no
+      read-only role can be made. A query can't switch it off
+      mid-statement; a separate SET TRANSACTION READ WRITE could, which
+      needs a way past the single-SELECT validator first. See
+      THREAT_MODEL.md T1."""
     if _POSTGRES_SCHEME.match(connection_url):
         connection_url = _POSTGRES_SCHEME.sub("postgresql+asyncpg://", connection_url, count=1)
     options: dict[str, Any] = (
