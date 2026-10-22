@@ -43,10 +43,11 @@ might fail:
 Proven by an adversarial suite that sends writes straight to the database,
 bypassing the validator: [RED_TEAM.md](RED_TEAM.md).
 
-**How well an AI uses it:** `gpt-5-mini` answered 28 of 30 hand-written
+**How well an AI uses it:** `gpt-5-mini` answered 29 of 30 hand-written
 questions over the demo database correctly under strict grading (exact
-columns and values). Both misses are explained in
-[BENCHMARK.md](BENCHMARK.md), one of them a flaw in the question.
+columns and values), 30 of 30 leniently. Every miss across both runs is
+explained in [BENCHMARK.md](BENCHMARK.md), including a tool fix and a
+question fix that came out of the first run.
 
 ## Use it
 

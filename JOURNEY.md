@@ -1469,3 +1469,10 @@ partitions of a partitioned table, since querying the parent already
 includes them. Pagila goes from 70 listed tables to 15, which is what
 the dataset really has. That's a tool fix prompted by the benchmark, not
 a re-score: the published run stays as it was.
+
+Second benchmark run, after those two fixes: **29/30 strict, 30/30
+lenient.** Both run-1 failures now pass. The one strict miss is the
+agent adding a `category_id` column next to the right category and total:
+exactly the case the lenient grader exists for, and the reason both scores
+are published. Both runs stay in `BENCHMARK.md` side by side, with what
+changed between them, rather than the better number replacing the worse.
