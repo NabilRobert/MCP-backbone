@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import ApiKey, ConsoleCredential, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
 from app.console.throttle import demo_signup_limiter, login_limiter
-from app.db import Base, SessionLocal, engine
+from app.db import Base, SessionLocal, dispose_target_engines, engine
 from app.query.models import DataSourceConnection
 
 # The guard that makes the above safe to rely on: refuse to run at all
@@ -56,6 +56,14 @@ if "test" not in (engine.url.database or ""):
         f"APP_TEST_DATABASE_URL to a disposable database whose name contains 'test'.",
         returncode=2,
     )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _close_target_engines() -> AsyncGenerator[None]:
+    """Target engines are pooled per event loop and each test has its own
+    loop, so close this test's connections when it ends."""
+    yield
+    await dispose_target_engines()
 
 
 @pytest.fixture(autouse=True)

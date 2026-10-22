@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, check_and_increment
 from app.config import settings
-from app.db import create_target_engine
+from app.db import get_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
 from app.query.service import QueryExecutionError, get_data_source, write_audit
 
@@ -28,23 +28,19 @@ async def _fetch_live(connection_url: str) -> dict[str, list[dict[str, str]]]:
     """Connects to the real database and asks it directly: what tables
     exist, and what columns (name + type) does each one have? Returns
     something like {"customers": [{"name": "id", "type": "INTEGER"}, ...]}."""
-    engine = create_target_engine(connection_url)
-    try:
-        async with engine.connect() as conn:
+    async with get_target_engine(connection_url).connect() as conn:
 
-            def _inspect(sync_conn: Any) -> dict[str, list[dict[str, str]]]:
-                inspector: Inspector = inspect(sync_conn)
-                return {
-                    table: [
-                        {"name": col["name"], "type": str(col["type"])}
-                        for col in inspector.get_columns(table)
-                    ]
-                    for table in inspector.get_table_names()
-                }
+        def _inspect(sync_conn: Any) -> dict[str, list[dict[str, str]]]:
+            inspector: Inspector = inspect(sync_conn)
+            return {
+                table: [
+                    {"name": col["name"], "type": str(col["type"])}
+                    for col in inspector.get_columns(table)
+                ]
+                for table in inspector.get_table_names()
+            }
 
-            return await conn.run_sync(_inspect)
-    finally:
-        await engine.dispose()
+        return await conn.run_sync(_inspect)
 
 
 async def get_table_metadata(
@@ -143,9 +139,8 @@ async def sample_rows(
     # only thing keeping this safe.
     quoted_name = table_name.replace('"', '""')
 
-    engine = create_target_engine(data_source.connection_url)
     try:
-        async with engine.connect() as conn:
+        async with get_target_engine(data_source.connection_url).connect() as conn:
             result = await conn.execute(
                 text(f'SELECT * FROM "{quoted_name}" LIMIT :limit'), {"limit": safe_limit}
             )
@@ -156,8 +151,6 @@ async def sample_rows(
     except Exception as exc:  # recorded, then re-raised as a clean tool error
         await write_audit(session, workspace, data_source, audit_sql, "errored", None, str(exc))
         raise QueryExecutionError(f"sample_rows failed: {exc}") from exc
-    finally:
-        await engine.dispose()
 
     await write_audit(session, workspace, data_source, audit_sql, "succeeded", None, None)
     return rows

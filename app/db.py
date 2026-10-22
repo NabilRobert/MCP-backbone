@@ -4,10 +4,12 @@ app's internal bookkeeping database -- see APP_DATABASE_URL in
 Everything else in app/ that reads or writes workspaces, API keys, the
 audit log, etc. goes through what's defined here."""
 
+import asyncio
 import re
+import weakref
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from sqlalchemy import DateTime
 from sqlalchemy.ext.asyncio import (
@@ -49,7 +51,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 _POSTGRES_SCHEME = re.compile(r"^postgresql(\+\w+)?://")
 
 
-def create_target_engine(connection_url: str) -> AsyncEngine:
+def create_target_engine(connection_url: str, *, pooled: bool = False) -> AsyncEngine:
     """Every place that connects to a workspace's real TARGET database
     (app/query/service.py, app/query/schema_cache.py -- never this
     project's own bookkeeping one, that's the module-level `engine`
@@ -87,11 +89,49 @@ def create_target_engine(connection_url: str) -> AsyncEngine:
     rule first. Where a read-only role CAN be made, use both."""
     if _POSTGRES_SCHEME.match(connection_url):
         connection_url = _POSTGRES_SCHEME.sub("postgresql+asyncpg://", connection_url, count=1)
+    options: dict[str, Any] = (
+        # Kept small: one server process, and a target may be a shared,
+        # connection-limited managed host. pre_ping drops connections the
+        # server or a pooler closed; recycle bounds how long one lives.
+        {"pool_size": 2, "max_overflow": 3, "pool_pre_ping": True, "pool_recycle": 300}
+        if pooled
+        else {"poolclass": NullPool}
+    )
     return create_async_engine(
         connection_url,
         connect_args={"statement_cache_size": 0},
         execution_options={"postgresql_readonly": True},
+        **options,
     )
+
+
+# One pooled engine per target URL, so tool calls reuse connections
+# instead of opening (and TLS-handshaking) a new one every time. Kept per
+# event loop, because an engine's connections belong to the loop that made
+# them: the server has one loop, but each test gets its own. A
+# WeakKeyDictionary forgets a loop's engines once that loop is gone.
+_target_engines: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, AsyncEngine]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def get_target_engine(connection_url: str) -> AsyncEngine:
+    """The shared, pooled engine for a target database. Use this for
+    every query path; create_target_engine() directly only for a one-off
+    connection, like testing a URL a user just typed in at signup."""
+    engines = _target_engines.setdefault(asyncio.get_running_loop(), {})
+    engine = engines.get(connection_url)
+    if engine is None:
+        engine = engines[connection_url] = create_target_engine(connection_url, pooled=True)
+    return engine
+
+
+async def dispose_target_engines() -> None:
+    """Closes every pooled target connection made on this event loop
+    (server shutdown, and after each test)."""
+    engines = _target_engines.pop(asyncio.get_running_loop(), {})
+    for engine in engines.values():
+        await engine.dispose()
 
 
 class Base(DeclarativeBase):

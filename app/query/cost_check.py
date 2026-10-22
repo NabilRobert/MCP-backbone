@@ -25,8 +25,11 @@ async def check_cost(
     do once we're sure the SQL itself has already been checked."""
     # A short timeout on the estimate itself -- even figuring out "how
     # expensive would this be" should always be quick. If it isn't,
-    # something is unusual enough to bail out rather than wait.
-    await conn.execute(text(f"SET statement_timeout = {timeout_seconds * 1000}"))
+    # something is unusual enough to bail out rather than wait. SET LOCAL:
+    # explicitly scoped to this transaction, so it can't outlive it on a
+    # pooled connection. (Target transactions always end in a rollback,
+    # which would undo a plain SET too, but this doesn't rely on that.)
+    await conn.execute(text(f"SET LOCAL statement_timeout = {timeout_seconds * 1000}"))
 
     result = await conn.execute(text(f"EXPLAIN (FORMAT JSON) {normalized_sql}"))
     plan: list[dict[str, Any]] = result.scalar_one()

@@ -18,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.console.routes import router as console_router
 from app.crypto import check_encryption_key
+from app.db import dispose_target_engines
 from app.mcp.server import mcp
 
 
@@ -69,8 +70,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     # Refuse to start without a usable encryption key, rather than
     # starting fine and failing every tool call (see app/crypto.py).
     check_encryption_key()
-    async with mcp.session_manager.run():
-        yield
+    try:
+        async with mcp.session_manager.run():
+            yield
+    finally:
+        await dispose_target_engines()
 
 
 app = FastAPI(title="Database MCP Console", lifespan=lifespan)

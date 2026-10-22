@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, check_and_increment
 from app.config import settings
-from app.db import create_target_engine
+from app.db import get_target_engine
 from app.query.cost_check import check_cost
 from app.query.models import DataSourceConnection, QueryExecution
 from app.query.network_guard import UnsafeTargetError, ensure_public_target
@@ -112,17 +112,13 @@ async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
     """Connects to the workspace's real database just long enough to ask
     "what tables exist here?" and returns their names."""
     data_source = await get_data_source(session, workspace)
-    engine = create_target_engine(data_source.connection_url)
-    try:
-        async with engine.connect() as conn:
+    async with get_target_engine(data_source.connection_url).connect() as conn:
 
-            def _get_table_names(sync_conn: Any) -> list[str]:
-                inspector: Inspector = inspect(sync_conn)
-                return inspector.get_table_names()
+        def _get_table_names(sync_conn: Any) -> list[str]:
+            inspector: Inspector = inspect(sync_conn)
+            return inspector.get_table_names()
 
-            return await conn.run_sync(_get_table_names)
-    finally:
-        await engine.dispose()
+        return await conn.run_sync(_get_table_names)
 
 
 async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> dict[str, Any]:
@@ -162,71 +158,67 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     rows: list[dict[str, Any]] = []
     truncated = False
 
-    engine = create_target_engine(data_source.connection_url)
-    try:
-        async with engine.connect() as conn:
-            # Step 3: how expensive would this query be? (see
-            # app/query/cost_check.py.) Only reached once the SQL has
-            # already passed the safety check above.
-            try:
-                cost = await check_cost(
-                    conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
-                )
-            except QueryRejected as exc:
-                await write_audit(
-                    session, workspace, data_source, sql, "rejected", None, exc.reason
-                )
-                return {"status": "rejected", "rows": [], "error": exc.reason}
-            except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
-                await write_audit(session, workspace, data_source, sql, "errored", None, str(exc))
-                return {"status": "errored", "rows": [], "error": str(exc)}
-
-            # Step 4: actually run the query, but with a safety net -- if
-            # it takes longer than this timeout, Postgres kills it
-            # itself rather than letting it run forever.
-            await conn.execute(
-                text(f"SET statement_timeout = {settings.query_timeout_seconds * 1000}")
+    async with get_target_engine(data_source.connection_url).connect() as conn:
+        # Step 3: how expensive would this query be? (see
+        # app/query/cost_check.py.) Only reached once the SQL has
+        # already passed the safety check above.
+        try:
+            cost = await check_cost(
+                conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
             )
+        except QueryRejected as exc:
+            await write_audit(
+                session, workspace, data_source, sql, "rejected", None, exc.reason
+            )
+            return {"status": "rejected", "rows": [], "error": exc.reason}
+        except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
+            await write_audit(session, workspace, data_source, sql, "errored", None, str(exc))
+            return {"status": "errored", "rows": [], "error": str(exc)}
 
-            # Try running the query, up to MAX_ATTEMPTS times. Most
-            # queries succeed on the very first try; the loop only
-            # exists to retry the rare case where the database
-            # CONNECTION itself dropped (see TRANSIENT_EXCEPTIONS above).
-            for attempt in range(1, MAX_ATTEMPTS + 1):
-                try:
-                    # Streamed through a server-side cursor and cut off at
-                    # the cap: the cost check limits how expensive a query
-                    # is, not how big its result is, and a cheap
-                    # "select * from rental" is 16,000 rows -- far too many
-                    # to hand an AI model. One extra row is fetched only to
-                    # tell "exactly at the cap" from "cut off".
-                    result = await conn.stream(text(normalized_sql))
-                    fetched = await result.fetchmany(settings.max_result_rows + 1)
-                    await result.close()
-                    truncated = len(fetched) > settings.max_result_rows
-                    rows = [
-                        dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
-                        for row in fetched[: settings.max_result_rows]
-                    ]
-                    break  # success -- stop trying
-                except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
-                    cause = _asyncpg_cause(exc)
-                    if isinstance(cause, asyncpg.exceptions.QueryCanceledError):
-                        # The timeout from step 4 kicked in. Never retry
-                        # this -- the query was just too slow, and
-                        # trying again would just be slow again.
-                        status, error_message = "timed_out", "statement timeout exceeded"
-                        break
-                    if isinstance(cause, TRANSIENT_EXCEPTIONS) and attempt < MAX_ATTEMPTS:
-                        # The connection itself broke, not the query --
-                        # worth a short pause and one more try.
-                        await asyncio.sleep(RETRY_BACKOFF_SECONDS)
-                        continue
-                    # Anything else: give up and report it as an error.
-                    status, error_message = "errored", str(exc)
+        # Step 4: actually run the query, but with a safety net -- if
+        # it takes longer than this timeout, Postgres kills it
+        # itself rather than letting it run forever.
+        await conn.execute(
+            text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
+        )
+
+        # Try running the query, up to MAX_ATTEMPTS times. Most
+        # queries succeed on the very first try; the loop only
+        # exists to retry the rare case where the database
+        # CONNECTION itself dropped (see TRANSIENT_EXCEPTIONS above).
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                # Streamed through a server-side cursor and cut off at
+                # the cap: the cost check limits how expensive a query
+                # is, not how big its result is, and a cheap
+                # "select * from rental" is 16,000 rows -- far too many
+                # to hand an AI model. One extra row is fetched only to
+                # tell "exactly at the cap" from "cut off".
+                result = await conn.stream(text(normalized_sql))
+                fetched = await result.fetchmany(settings.max_result_rows + 1)
+                await result.close()
+                truncated = len(fetched) > settings.max_result_rows
+                rows = [
+                    dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
+                    for row in fetched[: settings.max_result_rows]
+                ]
+                break  # success -- stop trying
+            except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
+                cause = _asyncpg_cause(exc)
+                if isinstance(cause, asyncpg.exceptions.QueryCanceledError):
+                    # The timeout from step 4 kicked in. Never retry
+                    # this -- the query was just too slow, and
+                    # trying again would just be slow again.
+                    status, error_message = "timed_out", "statement timeout exceeded"
                     break
-    finally:
-        await engine.dispose()
+                if isinstance(cause, TRANSIENT_EXCEPTIONS) and attempt < MAX_ATTEMPTS:
+                    # The connection itself broke, not the query --
+                    # worth a short pause and one more try.
+                    await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+                    continue
+                # Anything else: give up and report it as an error.
+                status, error_message = "errored", str(exc)
+                break
 
     # Step 5: no matter what happened above, write it to the audit log
     # before telling the caller the result.
