@@ -150,3 +150,29 @@ async def test_key_rotate_then_revoke(
     revoked = client.post("/console/keys/revoke")
     assert revoked.status_code == 200
     assert "no active key" in revoked.text
+
+
+async def test_root_redirects_to_signup_or_dashboard(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    client = TestClient(app, follow_redirects=False)
+    assert client.get("/").headers["location"] == "/console/signup"
+
+    client.post("/console/login", data={"username": "admin", "password": "testpass"})
+    assert client.get("/").headers["location"] == "/console/"
+
+
+async def test_allowed_hosts_match_with_and_without_port() -> None:
+    """Behind the reverse proxy, requests arrive as plain "mcp.my.id"
+    (standard port, no ":port" in the Host header); direct ones on
+    8443 as "mcp.my.id:8443". The SDK's "host:*" pattern only matches
+    the second, so both forms must be listed."""
+    from mcp.server.transport_security import TransportSecurityMiddleware
+
+    from app.main import transport_security_for
+
+    guard = TransportSecurityMiddleware(transport_security_for(["mcp.my.id"]))
+    assert guard._validate_host("mcp.my.id")  # pyright: ignore[reportPrivateUsage]
+    assert guard._validate_host("mcp.my.id:8443")  # pyright: ignore[reportPrivateUsage]
+    assert not guard._validate_host("evil.example")  # pyright: ignore[reportPrivateUsage]
+    assert guard._validate_origin("https://mcp.my.id")  # pyright: ignore[reportPrivateUsage]

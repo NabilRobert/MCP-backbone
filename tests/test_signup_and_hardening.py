@@ -14,6 +14,7 @@ from app.auth.models import InviteCode, Workspace
 from app.auth.service import authenticate
 from app.auth.signup import create_invite
 from app.config import settings
+from app.console.throttle import login_limiter
 from app.db import engine
 from app.main import app
 from app.query import schema_cache
@@ -289,3 +290,43 @@ async def test_signup_rejects_expired_and_unknown_invites(db_session: AsyncSessi
         response = _signup(client, code)
         assert response.status_code == 400
         assert "invalid, expired, or already used" in response.text
+
+
+async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
+) -> None:
+    """Behind Caddy, uvicorn's proxy-headers handling (the deployed
+    --forwarded-allow-ips flag) must give each visitor their own lockout
+    -- otherwise everyone shares the proxy's IP and one person's typos
+    lock out all users. And a client NOT coming from the proxy must not
+    be able to dodge the lockout by sending its own X-Forwarded-For."""
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    wrong = {"username": "admin", "password": "wrong"}
+
+    def fail_until_locked(client: TestClient, forwarded_for: str) -> None:
+        for _ in range(settings.login_max_failures):
+            client.post("/console/login", data=wrong, headers={"X-Forwarded-For": forwarded_for})
+
+    # TestClient's peer address is "testclient": trusted here, like Caddy.
+    via_proxy = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="testclient"))
+    fail_until_locked(via_proxy, "203.0.113.1")
+    locked = via_proxy.post(
+        "/console/login", data=wrong, headers={"X-Forwarded-For": "203.0.113.1"}
+    )
+    assert locked.status_code == 429
+    other_visitor = via_proxy.post(
+        "/console/login", data=wrong, headers={"X-Forwarded-For": "203.0.113.2"}
+    )
+    assert other_visitor.status_code == 200
+
+    # Untrusted peer: its X-Forwarded-For is ignored, so rotating it
+    # doesn't reset the count.
+    login_limiter.reset()
+    direct = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="172.18.0.0/16"))
+    for i in range(settings.login_max_failures):
+        direct.post("/console/login", data=wrong, headers={"X-Forwarded-For": f"198.51.100.{i}"})
+    spoofed = direct.post(
+        "/console/login", data=wrong, headers={"X-Forwarded-For": "198.51.100.99"}
+    )
+    assert spoofed.status_code == 429

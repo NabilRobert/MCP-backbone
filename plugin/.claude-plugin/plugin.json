@@ -15,7 +15,7 @@
       "type": "string",
       "title": "Server URL",
       "description": "The MCP endpoint of a running MCP-backbone server, ending in /mcp/",
-      "default": "https://mcp.my.id:8443/mcp/",
+      "default": "https://mcp.my.id/mcp/",
       "required": true
     },
     "api_key": {

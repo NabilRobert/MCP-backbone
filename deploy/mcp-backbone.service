@@ -3,12 +3,18 @@
 #          sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
 # Secrets: none here. The app reads .env from WorkingDirectory.
 #
-# uvicorn terminates TLS itself on 8443 (no proxy in front; ports 80/443 on
-# this VPS belong to an unrelated site). The cert comes from Let's Encrypt
+# Public traffic arrives two ways: https://mcp.my.id (port 443) through the
+# Caddy reverse proxy that also serves the unrelated Tamara site (see
+# deploy/caddy-mcp.caddyfile), and directly on 8443. uvicorn terminates TLS
+# itself on 8443 for both. The cert comes from Let's Encrypt
 # via a Cloudflare DNS-01 challenge. certbot renews it, and
 # deploy/certbot-deploy-hook.sh copies it to /etc/mcp-backbone/tls/ (this
 # service runs as ubuntu, which can't read /etc/letsencrypt/live) and
 # restarts the service.
+#
+# --forwarded-allow-ips 172.18.0.0/16: trust X-Forwarded-For only from Caddy's
+# Docker network, so login throttling sees each visitor's real IP behind the
+# proxy, while a client connecting directly to 8443 can't fake one.
 #
 # --timeout-graceful-shutdown 5: without it, a restart hangs until systemd's
 # 90s stop timeout, because uvicorn waits for open MCP streaming connections
@@ -21,7 +27,7 @@ Wants=network-online.target postgresql.service
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/MCP-backbone
-ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-certfile /etc/mcp-backbone/tls/fullchain.pem --ssl-keyfile /etc/mcp-backbone/tls/privkey.pem --timeout-graceful-shutdown 5
+ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-certfile /etc/mcp-backbone/tls/fullchain.pem --ssl-keyfile /etc/mcp-backbone/tls/privkey.pem --proxy-headers --forwarded-allow-ips 172.18.0.0/16 --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=3
 

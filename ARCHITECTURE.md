@@ -196,11 +196,17 @@ setting things up:
   `.env` at run time, so this file contains none.
 - **`mcp-backbone.service`** — the systemd unit that runs the server
   (restarts on failure, starts at boot). uvicorn serves HTTPS itself
-  on port 8443, so clients connect to `https://mcp.my.id:8443/mcp`.
+  on port 8443. The public address is `https://mcp.my.id`, through the
+  Caddy proxy below; 8443 also still answers directly.
   Install instructions are in its header.
 - **`certbot-deploy-hook.sh`** — runs after each automatic certificate
   renewal: copies the new cert to where the service can read it, then
   restarts the service.
+- **`caddy-mcp.caddyfile`** — the site block that makes `https://mcp.my.id`
+  (no port) work. Ports 80/443 on the VPS belong to the unrelated Tamara
+  site's Caddy container, so that Caddy reverse-proxies this one domain to
+  the MCP server on the host. The file's header has the apply steps,
+  which validate before going live and need no Tamara rebuild.
 - **`crontab`** — the one cron line that runs the nightly backup.
 
 ## `plugin/`: the Claude Code plugin

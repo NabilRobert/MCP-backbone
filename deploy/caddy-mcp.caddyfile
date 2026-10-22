@@ -1,0 +1,38 @@
+# Site block for https://mcp.my.id, appended to the Tamara site's Caddyfile on
+# the VPS: /home/ubuntu/sites/tamara-deploy/Caddyfile. Ports 80/443 there
+# belong to that site's Caddy container, so it reverse-proxies this one
+# domain to the MCP server on the host. Caddy gets and renews the
+# certificate for mcp.my.id itself.
+#
+# 172.18.0.1 is the host as seen from the tamara-deploy_default Docker
+# network (its gateway). If that network is ever recreated with a different
+# subnet, update this address and --forwarded-allow-ips in
+# deploy/mcp-backbone.service to match.
+#
+# The upstream speaks HTTPS (uvicorn terminates TLS on 8443 with the
+# mcp.my.id certificate), so tls_server_name makes Caddy verify that
+# certificate by name rather than by the IP it connects to.
+#
+# Caddy streams responses for text/event-stream automatically, which the
+# MCP Streamable HTTP transport relies on. It also replaces any
+# X-Forwarded-For a client sends with the client's real address, which
+# uvicorn then trusts from this network only.
+#
+# Apply without rebuilding the image or restarting Tamara. Validate a copy
+# BEFORE it replaces the live file: a broken /etc/caddy/Caddyfile would take
+# Tamara down the next time the container restarts.
+#   cd ~/sites/tamara-deploy && cp Caddyfile Caddyfile.bak
+#   { echo; sed -n '/^mcp.my.id {/,$p' ~/MCP-backbone/deploy/caddy-mcp.caddyfile; } >> Caddyfile
+#   docker cp Caddyfile tamara-site:/tmp/Caddyfile.new
+#   docker exec tamara-site caddy validate --config /tmp/Caddyfile.new --adapter caddyfile
+#   docker cp Caddyfile tamara-site:/etc/caddy/Caddyfile
+#   docker exec tamara-site caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+# The host file is what the image is built from, so the next rebuild keeps it.
+
+mcp.my.id {
+	reverse_proxy https://172.18.0.1:8443 {
+		transport http {
+			tls_server_name mcp.my.id
+		}
+	}
+}

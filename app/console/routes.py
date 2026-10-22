@@ -39,9 +39,14 @@ async def _require_login(
 
 
 def _client_ip(request: Request) -> str:
-    # uvicorn faces the internet directly (no proxy in front), so the
-    # socket's peer address is the real client -- no X-Forwarded-For
-    # header to trust or spoof.
+    # The real visitor's IP, even behind the reverse proxy (Caddy) in
+    # front of the deployment: uvicorn runs with --proxy-headers and
+    # --forwarded-allow-ips set to the proxy's network only (see
+    # deploy/mcp-backbone.service), so it replaces request.client with
+    # the X-Forwarded-For address only when the request really came
+    # from the proxy. A visitor connecting directly can't spoof it.
+    # Without that, every visitor would share the proxy's IP, and one
+    # person's failed logins would lock everyone out.
     return request.client.host if request.client else "unknown"
 
 

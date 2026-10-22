@@ -38,7 +38,7 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 96 passing tests against a real Postgres instance, CI
+the model. 99 passing tests against a real Postgres instance, CI
 running on every push.
 
 **The MCP server can now actually be reached over a network** --
@@ -58,7 +58,7 @@ each found only by actually running it.
 **Deployed and live on a real VPS, behind a real domain** -- a real
 Claude Code session, running on a laptop, successfully calling this
 server's tools over the open internet against the real Pagila
-database, over HTTPS (`https://mcp.my.id:8443/mcp`, a Let's Encrypt
+database, over HTTPS (`https://mcp.my.id/mcp/`, a Let's Encrypt
 certificate that renews itself). Runs under a systemd unit
 (`mcp-backbone`), not a manually tracked background process; the unit,
 cert-renewal hook, backup script and cron line all live in `deploy/`
@@ -171,7 +171,7 @@ match, so the two can't drift apart.
 You need an invite code from whoever runs the server.
 
 1. **Sign up** at `https://<server>/console/signup` (this project's own
-   server is `https://mcp.my.id:8443/console/signup`). Enter the invite
+   server is `https://mcp.my.id`). Enter the invite
    code, a username and a password of at least 12 characters.
    - **Your database:** leave it blank to use the server's demo database
      (Pagila, a sample DVD-rental store). To query your own Postgres

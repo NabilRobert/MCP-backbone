@@ -9,7 +9,8 @@ two separate processes to run and expose."""
 import contextlib
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.sessions import SessionMiddleware
@@ -18,6 +19,7 @@ from app.config import settings
 from app.console.routes import router as console_router
 from app.crypto import check_encryption_key
 from app.mcp.server import mcp
+
 
 # mcp.streamable_http_app() returns its own little Starlette app with
 # its own lifespan (it starts a background session manager task on
@@ -38,16 +40,27 @@ from app.mcp.server import mcp
 # allows the Host header to be 127.0.0.1/localhost by default -- a real
 # deploy hit this directly, every external request rejected with
 # "421 Misdirected Request" until APP_MCP_ALLOWED_HOSTS named the real
-# domain explicitly.
+# domain explicitly. Each allowed host is accepted both bare and with
+# any port: "host:*" only matches a Host header that HAS a port (e.g.
+# mcp.my.id:8443), while a request through a reverse proxy on the
+# standard port arrives as plain "mcp.my.id".
+def transport_security_for(extra_hosts: list[str]) -> TransportSecuritySettings:
+    return TransportSecuritySettings(
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        + [pattern for host in extra_hosts for pattern in (host, f"{host}:*")],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+        + [
+            origin
+            for host in extra_hosts
+            for scheme in ("http", "https")
+            for origin in (f"{scheme}://{host}", f"{scheme}://{host}:*")
+        ],
+    )
+
+
 _extra_hosts = [h.strip() for h in settings.mcp_allowed_hosts.split(",") if h.strip()]
 mcp_app = mcp.streamable_http_app(
-    streamable_http_path="/",
-    transport_security=TransportSecuritySettings(
-        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
-        + [f"{host}:*" for host in _extra_hosts],
-        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
-        + [f"{scheme}://{host}:*" for host in _extra_hosts for scheme in ("http", "https")],
-    ),
+    streamable_http_path="/", transport_security=transport_security_for(_extra_hosts)
 )
 
 
@@ -85,6 +98,15 @@ app.mount("/console/static", StaticFiles(directory="app/console/static"), name="
 # The actual MCP server, reachable over a real network connection for
 # the first time -- see JOURNEY.md for why that wasn't true before.
 app.mount("/mcp", mcp_app)
+
+
+@app.get("/", include_in_schema=False)
+async def root(request: Request) -> RedirectResponse:
+    """The bare domain is the front door: logged-in users go to their
+    dashboard, everyone else to signup (which links to login)."""
+    if request.session.get("workspace_id"):
+        return RedirectResponse("/console/", status_code=307)
+    return RedirectResponse("/console/signup", status_code=307)
 
 
 @app.get("/healthz")
