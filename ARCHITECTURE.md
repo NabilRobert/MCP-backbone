@@ -209,6 +209,11 @@ setting things up:
   site's Caddy container, so that Caddy reverse-proxies this one domain to
   the MCP server on the host. The file's header has the apply steps,
   which validate before going live and need no Tamara rebuild.
+- **`setup_demo_database.sh`** — one-off: builds the public demo database
+  (Pagila) on the VPS's own Postgres with a real read-only role, proves
+  that role can't write or reach the bookkeeping database, then points
+  `APP_TARGET_DATABASE_URL` at it. Stops before touching the app if any
+  check fails.
 - **`crontab`** — the one cron line that runs the nightly backup.
 
 ## `plugin/`: the Claude Code plugin
@@ -258,15 +263,12 @@ fixing it. `README.md` is the front door to all of that.
 - The console's pages are verified via FastAPI's `TestClient` (the real
   HTTP layer), but never visually confirmed in an actual browser — a
   preview-sandbox limitation hit while building it, see JOURNEY.md.
-- The real target database (`APP_TARGET_DATABASE_URL`, now loaded with
-  Pagila) has no DB-level read-only role yet — the connecting account
-  on that managed host can't `CREATE ROLE`, so
-  `scripts/provision_readonly_role.py` can't run against it. That
-  database currently relies on the app-level validator alone, not the
-  defense-in-depth role-level block THREAT_MODEL.md describes. See
-  JOURNEY.md for why, and for a real session-state leak this same
-  target host's connection pooler caused and how the loader now avoids
-  it.
+- The demo database used to live on a managed host that doesn't allow
+  `CREATE ROLE`, so it had no read-only role and relied on the app-level
+  validator alone. `deploy/setup_demo_database.sh` moves it to the VPS's
+  own Postgres with a real read-only role. A workspace's *own* database
+  (invite signups) still gets only the role the user supplies; signup
+  warns when that login can write.
 - The VPS's cloud firewall (the provider's security group) appears
   wide open: ports 8000 and 8443 were both reachable without any rule
   being added. Nothing sensitive listens publicly today (the local

@@ -42,7 +42,7 @@ all four MCP tools (`list_tables`, `describe_table`, `sample_rows`,
 `run_query`) work end to end through the real MCP protocol -- verified
 via an in-memory client/server session, not just the SDK's raise-on-error
 convenience method, which caught a real bug in how tool errors reached
-the model. 105 passing tests against a real Postgres instance, CI
+the model. 109 passing tests against a real Postgres instance, CI
 running on every push.
 
 **The MCP server can now actually be reached over a network** --
@@ -226,7 +226,12 @@ estimated to be too expensive.
    ```
 
    Send them the code and the signup link.
-3. **Manage access.** Revoke a key from the console, or with
+3. **Host the demo database yourself (recommended).** Anyone can sign up for
+   the demo, so its database should refuse writes on its own, not only through
+   the app's checks. `deploy/setup_demo_database.sh` builds Pagila on the
+   server's own Postgres with a read-only login, proves that login can't
+   write, and switches the app over.
+4. **Manage access.** Revoke a key from the console, or with
    `scripts/revoke_key.py`. `scripts/seed_workspace.py` still creates a
    workspace directly, without an invite.
 

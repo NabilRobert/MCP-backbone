@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.config import settings
 from app.crypto import decrypt, encrypt
 from app.db import Base
 
@@ -14,25 +15,35 @@ from app.db import Base
 
 class DataSourceConnection(Base):
     """Which real, outside database a workspace is allowed to query.
-    The connection string (which host, which database, which login and
-    password) is stored ENCRYPTED (see app/crypto.py) -- only the
-    `connection_url` property below ever sees it in plain text, so
-    every caller reads and writes it exactly as before.
 
-    Set either by the operator (scripts/seed_workspace.py) or by an
-    invited user at signup (app/auth/signup.py). Either way it passes
-    app/query/network_guard.py first, which refuses anything that
-    resolves to a loopback/private address -- and get_data_source()
-    re-checks that on every single use."""
+    Either the server's default database, or one of the workspace's own:
+    - Default (encrypted_connection_url is NULL): resolved from
+      APP_TARGET_DATABASE_URL every time it's used, so changing that
+      setting moves every default workspace at once, and the default's
+      password is never copied into this table. Operator-configured, so
+      it's exempt from the private-address check (it may well be on
+      localhost).
+    - Its own (an invited user's, or one the operator seeded): stored
+      ENCRYPTED (see app/crypto.py), and checked by
+      app/query/network_guard.py at registration and again by
+      get_data_source() on every use.
+
+    Callers just read `connection_url`, which handles both."""
 
     __tablename__ = "data_source_connections"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
-    encrypted_connection_url: Mapped[str]
+    encrypted_connection_url: Mapped[str | None]
+
+    @property
+    def uses_default_target(self) -> bool:
+        return self.encrypted_connection_url is None
 
     @property
     def connection_url(self) -> str:
+        if self.encrypted_connection_url is None:
+            return settings.target_database_url
         return decrypt(self.encrypted_connection_url)
 
     @connection_url.setter

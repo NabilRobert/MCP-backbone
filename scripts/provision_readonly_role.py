@@ -61,6 +61,21 @@ async def provision(admin_dsn: str, role_name: str, database: str, schema: str) 
         await conn.execute(
             f'alter default privileges in schema "{schema}" revoke execute on functions from public'
         )
+        # Grants to PUBLIC apply to every role, this one included, and
+        # can't be revoked per role. A schema that grants CREATE to PUBLIC
+        # (Pagila's dump does: "GRANT ALL ON SCHEMA public TO PUBLIC")
+        # would let this "read-only" role create tables. Not revoked here,
+        # since that would change access for every other role on a
+        # database this script doesn't own outright -- refused instead,
+        # so it can't go unnoticed.
+        can_create = await conn.fetchval(
+            "select has_schema_privilege($1, $2, 'CREATE')", role_name, schema
+        )
+        if can_create:
+            raise RuntimeError(
+                f'role "{role_name}" can still CREATE in schema "{schema}" through a grant '
+                f'to PUBLIC. Fix with: REVOKE CREATE ON SCHEMA "{schema}" FROM PUBLIC;'
+            )
     finally:
         await conn.close()
     return password

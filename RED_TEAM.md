@@ -24,6 +24,7 @@ Organized by the threats listed in [THREAT_MODEL.md](THREAT_MODEL.md):
 | Privilege escalation | `SET ROLE`, `SET SESSION AUTHORIZATION`, `RESET ROLE` | Rejected by the "only `SELECT` statements" check |
 | Statement stacking | A harmless `SELECT` followed by a hidden `DROP TABLE`, including a comment-obfuscated variant | Rejected by the "exactly one statement" check |
 | Workspace isolation | One workspace exhausts its rate limit | A second, unrelated workspace is confirmed unaffected |
+| "Read-only" role that can still create | Provisioning a role on a schema whose dump granted `CREATE` to `PUBLIC` (Pagila's does) | Provisioning refuses, rather than report a read-only role that can create tables; the Pagila loader also drops that grant |
 
 ## What this suite deliberately does NOT try to prove
 

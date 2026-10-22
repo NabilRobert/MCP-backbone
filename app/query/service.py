@@ -66,11 +66,14 @@ async def get_data_source(session: AsyncSession, workspace: Workspace) -> DataSo
     if data_source is None:
         raise QueryExecutionError("workspace has no data source connection configured")
     # Re-checked on every use, not just at registration: the host's DNS
-    # could have been changed since to point somewhere private.
-    try:
-        await ensure_public_target(data_source.connection_url)
-    except UnsafeTargetError as exc:
-        raise QueryExecutionError(str(exc)) from exc
+    # could have been changed since to point somewhere private. The
+    # server's own default database is the operator's choice, not a
+    # user's, so it's exempt (it may legitimately be on localhost).
+    if not data_source.uses_default_target:
+        try:
+            await ensure_public_target(data_source.connection_url)
+        except UnsafeTargetError as exc:
+            raise QueryExecutionError(str(exc)) from exc
     return data_source
 
 

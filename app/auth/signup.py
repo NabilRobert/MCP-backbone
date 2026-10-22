@@ -118,7 +118,7 @@ async def _create_workspace(
     session: AsyncSession,
     username: str,
     password: str,
-    connection_url: str,
+    connection_url: str | None,
     created_via: str,
     now: datetime.datetime,
 ) -> tuple[Workspace, str]:
@@ -135,7 +135,12 @@ async def _create_workspace(
     session.add(workspace)
     await session.flush()
 
-    session.add(DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url))
+    # None = the server's default database, resolved from settings on
+    # every use (see DataSourceConnection), never copied in here.
+    if connection_url is None:
+        session.add(DataSourceConnection(workspace_id=workspace.id, encrypted_connection_url=None))
+    else:
+        session.add(DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url))
     session.add(
         ConsoleCredential(
             workspace_id=workspace.id,
@@ -184,7 +189,7 @@ async def _sign_up_demo(
 
     try:
         workspace, api_key = await _create_workspace(
-            session, username, password, settings.target_database_url, "demo", now
+            session, username, password, None, "demo", now
         )
         await session.commit()
     except IntegrityError as exc:
@@ -258,7 +263,7 @@ async def sign_up(
             session,
             username,
             password,
-            connection_url or settings.target_database_url,
+            connection_url or None,
             "invite",
             now,
         )

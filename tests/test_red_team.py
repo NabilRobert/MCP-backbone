@@ -57,22 +57,24 @@ async def test_disguised_write_rejected_by_validator(
     result = await run_query(db_session, workspace, sql)
     assert result["status"] == "rejected"
 
-    rows = (
-        await db_session.execute(text("select count(*) as c from demo_items"))
-    ).mappings().one()
+    rows = (await db_session.execute(text("select count(*) as c from demo_items"))).mappings().one()
     assert rows["c"] == 2  # unchanged from the seed fixture -- nothing actually wrote
 
     if "stolen_copy" in sql:
         # The SELECT INTO case specifically: confirm it didn't even
         # create its target table, not just that demo_items is intact.
         table_exists = (
-            await db_session.execute(
-                text(
-                    "select count(*) as c from information_schema.tables "
-                    "where table_name = 'stolen_copy'"
+            (
+                await db_session.execute(
+                    text(
+                        "select count(*) as c from information_schema.tables "
+                        "where table_name = 'stolen_copy'"
+                    )
                 )
             )
-        ).mappings().one()["c"]
+            .mappings()
+            .one()["c"]
+        )
         assert table_exists == 0
 
 
@@ -259,9 +261,7 @@ async def test_statement_stacking_rejected(
     result = await run_query(db_session, workspace, sql)
     assert result["status"] == "rejected"
 
-    rows = (
-        await db_session.execute(text("select count(*) as c from demo_items"))
-    ).mappings().one()
+    rows = (await db_session.execute(text("select count(*) as c from demo_items"))).mappings().one()
     assert rows["c"] == 2  # table still exists and is untouched
 
 
@@ -280,9 +280,7 @@ async def test_rate_limit_exhaustion_does_not_affect_other_workspaces(
     workspace, _ = seeded_workspace
 
     # Exhaust this workspace's default rate limit (5 per window).
-    results = [
-        await run_query(db_session, workspace, "select * from demo_items") for _ in range(6)
-    ]
+    results = [await run_query(db_session, workspace, "select * from demo_items") for _ in range(6)]
     assert results[-1]["status"] == "rejected"
 
     # A second, unrelated workspace should be unaffected.
@@ -296,9 +294,7 @@ async def test_rate_limit_exhaustion_does_not_affect_other_workspaces(
         )
     )
     db_session.add(
-        ConsoleCredential(
-            workspace_id=other.id, username="other", password_hash=hash_password("x")
-        )
+        ConsoleCredential(workspace_id=other.id, username="other", password_hash=hash_password("x"))
     )
     other_key = generate_api_key()
     db_session.add(
@@ -313,3 +309,47 @@ async def test_rate_limit_exhaustion_does_not_affect_other_workspaces(
 
     other_result = await run_query(db_session, other, "select * from demo_items")
     assert other_result["status"] == "succeeded"
+
+
+async def test_provisioning_refuses_a_schema_everyone_can_create_in(
+    db_session: AsyncSession,
+) -> None:
+    """Pagila's dump grants CREATE on its schema to PUBLIC, which made a
+    "read-only" role able to create tables (found by the VPS demo
+    setup's own write test). A grant to PUBLIC covers every role and
+    can't be revoked per role, so provisioning must refuse to hand out
+    a role on such a schema rather than report success."""
+    from sqlalchemy.engine.url import make_url
+
+    from app.db import engine
+    from scripts.provision_readonly_role import drop_role, provision
+
+    admin_dsn = (
+        make_url(engine.url.render_as_string(hide_password=False))
+        .set(drivername="postgresql")
+        .render_as_string(hide_password=False)
+    )
+    await db_session.execute(text("create schema if not exists leaky"))
+    await db_session.execute(text("grant create on schema leaky to public"))
+    await db_session.commit()
+    try:
+        with pytest.raises(RuntimeError, match="can still CREATE"):
+            await provision(admin_dsn, "redteam_leaky", make_url(admin_dsn).database or "", "leaky")
+    finally:
+        await drop_role(admin_dsn, "redteam_leaky")
+        await db_session.execute(text("drop schema leaky cascade"))
+        await db_session.commit()
+
+
+async def test_pagila_loader_drops_the_grant_that_opens_its_schema() -> None:
+    from scripts.load_pagila_dataset import (
+        _patch_schema,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    patched = _patch_schema(
+        "CREATE TABLE public.actor (id int);\n"
+        "REVOKE USAGE ON SCHEMA public FROM PUBLIC;\n"
+        "GRANT ALL ON SCHEMA public TO PUBLIC;\n"
+    )
+    assert "CREATE TABLE public.actor" in patched
+    assert "GRANT ALL ON SCHEMA public TO PUBLIC" not in patched

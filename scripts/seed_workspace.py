@@ -14,22 +14,31 @@ from app.query.models import DataSourceConnection
 from app.query.network_guard import ensure_public_target
 
 
-async def seed(name: str, connection_url: str, console_username: str, console_password: str) -> str:
+async def seed(
+    name: str, connection_url: str | None, console_username: str, console_password: str
+) -> str:
     """Creates everything a brand-new workspace needs in one go: the
     workspace itself, which real database it's allowed to query, a
     dashboard login, and its first API key. Returns the API key in
     plain text -- the ONLY time it ever exists in plain text, since
     only its hash gets stored (see app/auth/security.py)."""
-    # Same address check a self-serve signup gets: the operator can mistype too.
-    await ensure_public_target(connection_url)
+    # Same address check a self-serve signup gets: the operator can mistype
+    # too. No URL means the server's default database, which is exempt.
+    if connection_url:
+        await ensure_public_target(connection_url)
     async with SessionLocal() as session:
         workspace = Workspace(name=name, created_at=datetime.datetime.now(datetime.UTC))
         session.add(workspace)
         await session.flush()  # assigns workspace.id before it's used below
 
-        session.add(
-            DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url)
-        )
+        if connection_url:
+            session.add(
+                DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url)
+            )
+        else:
+            session.add(
+                DataSourceConnection(workspace_id=workspace.id, encrypted_connection_url=None)
+            )
         session.add(
             ConsoleCredential(
                 workspace_id=workspace.id,
@@ -55,7 +64,11 @@ async def seed(name: str, connection_url: str, console_username: str, console_pa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", required=True, help="Workspace name")
-    parser.add_argument("--connection-url", required=True, help="Target database connection string")
+    parser.add_argument(
+        "--connection-url",
+        help="Target database connection string. Omit to use the server's default "
+        "(APP_TARGET_DATABASE_URL).",
+    )
     parser.add_argument("--console-username", required=True)
     args = parser.parse_args()
 

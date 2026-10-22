@@ -412,3 +412,39 @@ async def test_invite_signup_is_recorded_as_invite(db_session: AsyncSession) -> 
     response = _signup(TestClient(app), invite, username="invited")
     api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
     assert (await authenticate(db_session, api_key)).created_via == "invite"
+
+
+# --- The default database is referenced, not copied --------------------------
+
+
+async def test_default_target_is_referenced_not_stored(db_session: AsyncSession) -> None:
+    """A demo workspace stores no URL at all: it follows
+    APP_TARGET_DATABASE_URL, so the operator can move every default
+    workspace by changing one setting, and the default's password is
+    never copied into the bookkeeping database."""
+    response = _demo_signup(TestClient(app), "demo-user")
+    assert response.status_code == 200
+
+    data_source = (await db_session.execute(select(DataSourceConnection))).scalar_one()
+    assert data_source.encrypted_connection_url is None
+    assert data_source.uses_default_target
+    assert data_source.connection_url == settings.target_database_url
+
+
+async def test_default_target_is_exempt_from_the_private_address_guard(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The operator's default database may live on localhost (the VPS
+    hosts the demo database itself), so it skips the guard -- while a
+    workspace's own localhost URL is still refused (see
+    test_guard_is_rechecked_on_every_use)."""
+    monkeypatch.setattr(
+        settings, "target_database_url", engine.url.render_as_string(hide_password=False)
+    )
+    monkeypatch.setattr(settings, "allow_private_targets", False)
+
+    response = _demo_signup(TestClient(app), "demo-user")
+    api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
+    workspace = await authenticate(db_session, api_key)
+
+    assert isinstance(await list_tables(db_session, workspace), list)

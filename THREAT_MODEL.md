@@ -137,7 +137,10 @@ NAT or reserved address, including IPv4 hidden inside IPv6
 (`::ffff:127.0.0.1`). It also refuses URL parameters that could add a
 second host (`?host=`) or read local files (`?passfile=`). It runs at
 signup and again on every use (`get_data_source`), so a DNS change after
-registration is caught too. The invite is checked before the URL is even
+registration is caught too. The one exemption is the server's own default
+database (`APP_TARGET_DATABASE_URL`): it's set by the operator, not a
+user, and may legitimately live on localhost. Workspaces on the default
+store no URL at all, so a user can't impersonate it. The invite is checked before the URL is even
 looked at, so an uninvited visitor can't use signup to make the server
 probe hosts. Tests cover each address class and parameter.
 
@@ -178,14 +181,16 @@ through the AI model's context or its transcripts.
   database password, the encryption key) live in the server's
   environment, not a secrets manager (ADR-005). That's an accepted
   tradeoff at this scale and trust level, revisited if that ever changes.
-- **The public demo database has one layer of write protection, not
-  two.** Demo signup is open, and the default target (Pagila on a managed
-  host) has no read-only database role: that host doesn't grant
-  `CREATE ROLE`. Anyone can sign up, so strangers' queries against it are
-  stopped only by the app-level validator (T1), which the red-team suite
-  tests, not by the database too. The fix is moving the demo database
-  somewhere a read-only role can be provisioned, such as the VPS's own
-  Postgres.
+- **The public demo database's second layer depends on the deploy
+  step.** Open demo signup means strangers query it, so it needs both
+  layers from T1: the app-level validator and a database role that can't
+  write. The original managed host couldn't create roles, so
+  `deploy/setup_demo_database.sh` moves the demo database onto the VPS's
+  own Postgres with a real read-only role. Run before that script, the
+  demo database has the validator only. The script also closes two
+  PUBLIC grants that would have let even a read-only role create objects
+  (`CREATE` on the schema, from Pagila's own dump, and `TEMP` on the
+  database).
 - **Demo account spam beyond the caps.** Signups are capped per client IP
   and in total per day, but someone with many IP addresses can still use
   up the daily total. That locks out new demo signups for the day; it

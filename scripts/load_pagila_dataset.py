@@ -38,6 +38,11 @@ advance -- see the comments next to each one:
      reassigning ownership needs permission to SET ROLE to the target
      role, which an ordinary (non-superuser) connection on a managed
      host doesn't have.
+  4. The dump's "GRANT ALL ON SCHEMA public TO PUBLIC" is dropped. It
+     re-opens what Postgres 15+ closed by default: every login, even a
+     read-only one, could CREATE tables in the schema. Found when the
+     VPS demo setup's own write test (deploy/setup_demo_database.sh)
+     managed to create a table as the read-only role.
 
 After loading, every table's row count is checked against the dump
 file itself (not a guessed number) -- "psql didn't error" was never
@@ -166,6 +171,10 @@ def _mentions_pgvector(statement: str) -> bool:
 
 
 _OWNER_TO_POSTGRES = re.compile(r"\bOWNER\s+TO\s+postgres\b", re.IGNORECASE)
+# Patch 4 (module docstring): would let every role create objects here.
+_GRANT_ALL_SCHEMA_TO_PUBLIC = re.compile(
+    r"\bGRANT\s+ALL\s+ON\s+SCHEMA\s+public\s+TO\s+PUBLIC\b", re.IGNORECASE
+)
 
 
 def _patch_schema(schema_sql: str) -> str:
@@ -173,7 +182,13 @@ def _patch_schema(schema_sql: str) -> str:
     patched_sql = patched_sql.replace(") VIRTUAL", ") STORED")
 
     statements = _split_sql_statements(patched_sql)
-    kept = [s for s in statements if not _mentions_pgvector(s) and not _OWNER_TO_POSTGRES.search(s)]
+    kept = [
+        s
+        for s in statements
+        if not _mentions_pgvector(s)
+        and not _OWNER_TO_POSTGRES.search(s)
+        and not _GRANT_ALL_SCHEMA_TO_PUBLIC.search(s)
+    ]
     return "\n".join(kept)
 
 

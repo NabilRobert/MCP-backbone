@@ -1304,3 +1304,55 @@ red-team suite exercises, but it's now one layer, not two, for anyone on
 the internet. Moving the demo database to the VPS's own Postgres, where a
 read-only role can be provisioned, is the follow-up that restores the
 second layer.
+
+## 2026-10-22 (continued) — A real read-only role for the public demo database
+
+Opening demo signup made an old gap a live one. The demo database
+(Pagila, on a managed host) never had a read-only role, because that
+host doesn't allow `CREATE ROLE`. Strangers' queries were stopped by the
+app's validator alone. The fix is hosting the demo database on the VPS's
+own Postgres, where a role can be made that the database itself stops
+from writing.
+
+Two app changes came first. Workspaces on the default database no longer
+store a copy of its URL. They store nothing and resolve
+`APP_TARGET_DATABASE_URL` on every use, so moving the default moves every
+demo workspace at once, and the default's password stops being copied
+into the bookkeeping database with every signup. A migration converts
+existing rows that were just copies of the current default. Second, the
+private-address guard exempts that default and nothing else: the new
+demo database is on localhost, which the guard exists to refuse for
+user-supplied URLs.
+
+`deploy/setup_demo_database.sh` does the move and refuses to touch the
+app until it has proved the new login is read-only. It was run for real
+against a Postgres 16 container standing in for the VPS first, and that
+proof is what caught the problem: **the "read-only" role created a
+table.** Pagila's own schema dump ends with `GRANT ALL ON SCHEMA public TO
+PUBLIC`, quietly undoing the Postgres 15 change that stopped everyone
+from creating objects in `public` by default. A grant to PUBLIC covers
+every role and can't be revoked per role, so provisioning had reported
+success for a role that could create tables. Three fixes, layered:
+
+- **The loader** now drops that grant from the dump, alongside its other
+  version patches.
+- **The setup script** revokes `CREATE` on the schema and `TEMP` on the
+  database from PUBLIC. `TEMP` is granted to PUBLIC on every new
+  database, so without the revoke the role could create temporary tables.
+- **`provision_readonly_role.py`** now refuses to finish if the role can
+  still create in the schema, instead of fixing PUBLIC itself on a
+  database it may not own outright. There's a red-team test for it.
+
+A side finding while there: Postgres lets every role connect to every
+database by default, so the demo role could have opened the bookkeeping
+database. It couldn't read any tables there, but it shouldn't get in at
+all. The script revokes that, keeping the app's own user's access, and
+proves the demo role is refused.
+
+Rerun in the stand-in after the fixes, every proof passed: it reads,
+and is refused for `CREATE TABLE`, `CREATE TEMP TABLE`, `UPDATE`,
+`DELETE` and connecting to the bookkeeping database. The app then served
+`list_tables`, `run_query` and `sample_rows` from the new database
+through its real code path, with the guard on. The existing (Sumopod)
+copy of Pagila had the same PUBLIC grant. It stops mattering once the
+default moves.
