@@ -125,3 +125,7 @@ scripts/      operator CLIs: invites, seeding, datasets, benchmark
 - [phase-5-architecture-decisions.md](phase-5-architecture-decisions.md):
   the ADRs. Phases [1](phase-1-problem-brief.md)–[7](phase-7-slices-plan.md)
   are the full planning trail.
+
+## License
+
+[MIT](LICENSE).

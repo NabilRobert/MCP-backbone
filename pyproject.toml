@@ -2,6 +2,7 @@
 name = "database-mcp"
 version = "0.1.0"
 description = "Standalone, read-only database MCP server"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

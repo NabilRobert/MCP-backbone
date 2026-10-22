@@ -9,6 +9,7 @@
   },
   "homepage": "https://github.com/NabilRobert/MCP-backbone",
   "repository": "https://github.com/NabilRobert/MCP-backbone",
+  "license": "MIT",
   "keywords": ["database", "postgres", "sql", "mcp", "read-only"],
   "userConfig": {
     "server_url": {
