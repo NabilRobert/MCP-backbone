@@ -43,6 +43,11 @@ might fail:
 Proven by an adversarial suite that sends writes straight to the database,
 bypassing the validator: [RED_TEAM.md](RED_TEAM.md).
 
+**How well an AI uses it:** `gpt-5-mini` answered 28 of 30 hand-written
+questions over the demo database correctly under strict grading (exact
+columns and values). Both misses are explained in
+[BENCHMARK.md](BENCHMARK.md), one of them a flaw in the question.
+
 ## Use it
 
 1. **Sign up** at https://mcp.my.id with a username and a password of 12+

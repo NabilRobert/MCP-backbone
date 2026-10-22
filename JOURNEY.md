@@ -1446,3 +1446,19 @@ anything.
   restart doesn't reset them. Console sessions carry a per-login version,
   so "log out everywhere" works server-side. OAuth is recorded as a
   deliberate deferral (ADR-008), not an oversight.
+- **The benchmark was too small and too easy to doubt.** It went from 30%
+  to 70% to 100% partly by loosening the grader, on ten hand-written
+  questions over a toy dataset. It's now 30 questions over Pagila (10
+  easy, 10 medium, 10 hard), checked against the data before use: no ties
+  at a top-N cut-off, UTC stated for timestamptz questions. Every answer is
+  graded strictly (exact columns and values) next to the old lenient
+  grader. `gpt-5-mini` scored **28/30 on both**: every correct answer was
+  exactly right. The first full attempt hung for three hours on question
+  24 with nothing timing it out; questions now have a 3-minute deadline.
+  Both misses were investigated rather than just counted. One is a real
+  failure that partly points at the tool: `list_tables` lists `payment`'s
+  55 partitions as separate tables, and the agent summed the parent plus
+  all of them, double-counting. The other was my question's fault: in this
+  Pagila variant most films have several categories, so "revenue per
+  category" had two right answers. The question is fixed for future runs,
+  and this run is reported as graded, not re-scored.

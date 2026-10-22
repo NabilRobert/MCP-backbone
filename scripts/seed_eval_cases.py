@@ -139,7 +139,10 @@ PAGILA: list[tuple[str, str, str]] = [
     ),
     (
         "hard",
-        "Which film category has generated the most payment revenue, and how much?",
+        (
+            "Which film category has generated the most payment revenue, and how much? "
+            "Count a film's full revenue toward every category it belongs to."
+        ),
         (
             "select c.name, sum(p.amount) as revenue from payment p "
             "join rental r on r.rental_id = p.rental_id "
