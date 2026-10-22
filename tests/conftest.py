@@ -2,13 +2,34 @@ import datetime
 import os
 import secrets
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+
+def _test_database_url() -> str | None:
+    """APP_TEST_DATABASE_URL from the environment or the project's .env.
+    Read by hand because this has to happen before app.config loads."""
+    if url := os.environ.get("APP_TEST_DATABASE_URL"):
+        return url
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("APP_TEST_DATABASE_URL="):
+                return line.split("=", 1)[1].strip().strip("\"'") or None
+    return None
+
+
 # Set before anything imports app.config (which reads settings once, at
-# import). A throwaway encryption key per test run; and the test target
-# database IS localhost, which the address guard (app/query/network_guard.py)
-# would otherwise refuse. Real env vars still win, via setdefault.
+# import). The suite DROPS EVERY TABLE in its database after each test,
+# so it gets its own: APP_TEST_DATABASE_URL, used as both the bookkeeping
+# and the target database, so a test run never touches a real one.
+# (CI sets APP_DATABASE_URL to its throwaway container directly.)
+if test_url := _test_database_url():
+    os.environ["APP_DATABASE_URL"] = test_url
+    os.environ["APP_TARGET_DATABASE_URL"] = test_url
+# A throwaway encryption key per run; and the test target database IS
+# localhost, which the address guard would otherwise refuse.
 os.environ.setdefault("APP_CONNECTION_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("APP_ALLOW_PRIVATE_TARGETS", "true")
 
@@ -23,6 +44,18 @@ from app.auth.security import generate_api_key, hash_api_key, hash_password
 from app.console.throttle import demo_signup_limiter, login_limiter
 from app.db import Base, SessionLocal, engine
 from app.query.models import DataSourceConnection
+
+# The guard that makes the above safe to rely on: refuse to run at all
+# unless the database is obviously a disposable test one. Without it,
+# pointing APP_DATABASE_URL at a real database (a dev one, or the VPS's
+# live bookkeeping database) and running pytest would wipe it.
+if "test" not in (engine.url.database or ""):
+    pytest.exit(
+        f"Refusing to run: the test suite drops every table in its database, and "
+        f"'{engine.url.database}' doesn't look like a test database. Set "
+        f"APP_TEST_DATABASE_URL to a disposable database whose name contains 'test'.",
+        returncode=2,
+    )
 
 
 @pytest.fixture(autouse=True)

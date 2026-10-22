@@ -267,12 +267,16 @@ CI's own Postgres service container (`.github/workflows/ci.yml`) is
 technically remote too (a fresh container on GitHub's runner), and it
 passes 100% because it connects as the default `postgres` superuser.
 
-For local dev, a disposable container is the easiest way to get that:
+For local dev, a disposable container is the easiest way to get that.
+Point `APP_TEST_DATABASE_URL` at it, not `APP_DATABASE_URL`: the suite drops
+every table in its database after each test, so it refuses to run unless
+the database name contains `test`.
 
 ```
-docker run -d --name jarvis-mcp-app-db \
-  -e POSTGRES_USER=jarvis -e POSTGRES_PASSWORD=jarvis -e POSTGRES_DB=jarvis_mcp \
-  -p 5432:5432 postgres:16-alpine
+docker run -d --name jarvis-mcp-test-db \
+  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test \
+  -p 55432:5432 postgres:16-alpine
+# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
 ```
 
 `APP_TARGET_DATABASE_URL` (the database being *queried*, not this
