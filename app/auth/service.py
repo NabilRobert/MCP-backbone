@@ -1,9 +1,11 @@
 import datetime
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ApiKey, Workspace
+from app.auth.scopes import ALL_TOOLS
 from app.auth.security import generate_api_key, hash_api_key
 
 
@@ -13,13 +15,28 @@ class AuthenticationError(Exception):
     clean error message for the AI model (see app/mcp/server.py)."""
 
 
-async def authenticate(session: AsyncSession, api_key: str) -> Workspace:
+class ToolNotPermitted(AuthenticationError):
+    """The key is valid, but not allowed to call this tool (its scopes,
+    app/auth/scopes.py). Carries the workspace so the refusal can still
+    be written to its audit log."""
+
+    def __init__(self, workspace: Workspace, tool: str) -> None:
+        self.workspace = workspace
+        self.tool = tool
+        super().__init__(
+            f"this API key isn't allowed to use {tool}; "
+            "issue a key with more access from the console's Keys page"
+        )
+
+
+async def authenticate(session: AsyncSession, api_key: str, tool: str | None = None) -> Workspace:
     """The front gate every tool call passes through. Takes whatever
     plain-text key the caller sent, hashes it the same way it was
     hashed when created, and looks for a matching, still-active row.
     If that's found, returns the Workspace it belongs to -- everything
     downstream of this function trusts that the caller is legitimately
-    acting as that workspace."""
+    acting as that workspace. With `tool`, also refuses (ToolNotPermitted)
+    unless the key's scopes include it."""
     key_hash = hash_api_key(api_key)
     result = await session.execute(
         select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.status == "active")
@@ -31,6 +48,8 @@ async def authenticate(session: AsyncSession, api_key: str) -> Workspace:
     workspace = await session.get(Workspace, api_key_row.workspace_id)
     if workspace is None:
         raise AuthenticationError("workspace not found")
+    if tool is not None and tool not in api_key_row.scopes:
+        raise ToolNotPermitted(workspace, tool)
     return workspace
 
 
@@ -57,7 +76,9 @@ async def revoke_api_key(session: AsyncSession, workspace: Workspace) -> None:
     await session.commit()
 
 
-async def rotate_api_key(session: AsyncSession, workspace: Workspace) -> str:
+async def rotate_api_key(
+    session: AsyncSession, workspace: Workspace, scopes: Iterable[str] = ALL_TOOLS
+) -> str:
     """Revokes whatever key is currently active (if any) and issues a
     brand-new one. Returns the new key in plain text -- the only time
     it ever exists that way, same as when a workspace is first created
@@ -71,6 +92,7 @@ async def rotate_api_key(session: AsyncSession, workspace: Workspace) -> str:
             key_hash=hash_api_key(new_key),
             status="active",
             created_at=datetime.datetime.now(datetime.UTC),
+            scopes=sorted(scopes),
         )
     )
     await session.commit()

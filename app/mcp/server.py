@@ -11,7 +11,8 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from app.auth.service import AuthenticationError, authenticate
+from app.auth.scopes import DESCRIBE_TABLE, LIST_TABLES, RUN_QUERY, SAMPLE_ROWS
+from app.auth.service import AuthenticationError, ToolNotPermitted, authenticate
 from app.db import SessionLocal
 from app.query import schema_cache
 from app.query import service as query_service
@@ -66,7 +67,7 @@ def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Await
 async def list_tables(ctx: Context, api_key: str | None = None) -> list[str]:
     """Tool: "what tables exist in my database?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key), LIST_TABLES)
         return await query_service.list_tables(session, workspace)
 
 
@@ -77,7 +78,7 @@ async def describe_table(
 ) -> dict[str, Any]:
     """Tool: "what columns does this specific table have?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
+        workspace = await authenticate(session, _resolve_api_key(ctx, api_key), DESCRIBE_TABLE)
         return await schema_cache.describe_table(session, workspace, table_name)
 
 
@@ -88,7 +89,14 @@ async def sample_rows(
 ) -> list[dict[str, Any]]:
     """Tool: "show me a few example rows from this table.\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
+        try:
+            workspace = await authenticate(session, _resolve_api_key(ctx, api_key), SAMPLE_ROWS)
+        except ToolNotPermitted as exc:
+            # An attempt to read data, so it's audited even when refused.
+            await query_service.record_refusal(
+                session, exc.workspace, f'SELECT * FROM "{table_name}" LIMIT {limit}', str(exc)
+            )
+            raise
         return await schema_cache.sample_rows(session, workspace, table_name, limit)
 
 
@@ -99,5 +107,9 @@ async def run_query(ctx: Context, sql: str, api_key: str | None = None) -> dict[
     that goes through every safety check (see app/query/validation.py
     and app/query/cost_check.py) before anything actually executes."""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx, api_key))
+        try:
+            workspace = await authenticate(session, _resolve_api_key(ctx, api_key), RUN_QUERY)
+        except ToolNotPermitted as exc:
+            await query_service.record_refusal(session, exc.workspace, sql, str(exc))
+            raise
         return await query_service.run_query(session, workspace, sql)

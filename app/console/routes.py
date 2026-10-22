@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
+from app.auth.scopes import PRESETS, describe_scopes
 from app.auth.service import get_active_api_key, revoke_api_key, rotate_api_key
 from app.auth.signup import MIN_PASSWORD_LENGTH, SignupError, sign_up
 from app.config import settings
@@ -32,9 +33,7 @@ router = APIRouter(prefix="/console")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
-async def _require_login(
-    request: Request, session: AsyncSession
-) -> Workspace | RedirectResponse:
+async def _require_login(request: Request, session: AsyncSession) -> Workspace | RedirectResponse:
     """Used at the top of every protected route below: returns the
     logged-in Workspace if there is one, or a ready-to-return redirect
     to the login page if not. (A plain FastAPI dependency can't short-
@@ -145,7 +144,7 @@ async def signup_submit(
 
 @router.post("/sessions/revoke")
 async def sessions_revoke(request: Request, session: AsyncSession = Depends(get_session)):
-    """"Log out everywhere": every console session for this workspace,
+    """ "Log out everywhere": every console session for this workspace,
     on every browser, stops working, including this one."""
     workspace_or_redirect = await _require_login(request, session)
     if isinstance(workspace_or_redirect, RedirectResponse):
@@ -176,10 +175,7 @@ async def keys(request: Request, session: AsyncSession = Depends(get_session)):
         return workspace_or_redirect
     workspace = workspace_or_redirect
 
-    active_key = await get_active_api_key(session, workspace)
-    return templates.TemplateResponse(
-        request, "keys.html", {"active_key": active_key, "new_key": None}
-    )
+    return await _keys_page(request, session, workspace, new_key=None)
 
 
 @router.post("/keys/revoke")
@@ -190,23 +186,52 @@ async def keys_revoke(request: Request, session: AsyncSession = Depends(get_sess
     workspace = workspace_or_redirect
 
     await revoke_api_key(session, workspace)
-    return templates.TemplateResponse(request, "keys.html", {"active_key": None, "new_key": None})
+    return await _keys_page(request, session, workspace, new_key=None)
 
 
 @router.post("/keys/rotate")
-async def keys_rotate(request: Request, session: AsyncSession = Depends(get_session)):
+async def keys_rotate(
+    request: Request,
+    access: str = Form("full"),
+    session: AsyncSession = Depends(get_session),
+):
     workspace_or_redirect = await _require_login(request, session)
     if isinstance(workspace_or_redirect, RedirectResponse):
         return workspace_or_redirect
     workspace = workspace_or_redirect
+    if access not in PRESETS:
+        return templates.TemplateResponse(
+            request,
+            "keys.html",
+            await _keys_context(session, workspace, new_key=None, error="Unknown access level."),
+            status_code=400,
+        )
 
     # Rendered directly here, not redirected -- the new plain-text key
     # only ever exists in this one response and is never stored, so a
     # redirect-after-POST (which would lose it) isn't an option.
-    new_key = await rotate_api_key(session, workspace)
+    new_key = await rotate_api_key(session, workspace, PRESETS[access][1])
+    return await _keys_page(request, session, workspace, new_key=new_key)
+
+
+async def _keys_context(
+    session: AsyncSession, workspace: Workspace, new_key: str | None, error: str | None = None
+) -> dict[str, Any]:
     active_key = await get_active_api_key(session, workspace)
+    return {
+        "active_key": active_key,
+        "access_label": describe_scopes(active_key.scopes) if active_key else None,
+        "presets": {name: label for name, (label, _) in PRESETS.items()},
+        "new_key": new_key,
+        "error": error,
+    }
+
+
+async def _keys_page(
+    request: Request, session: AsyncSession, workspace: Workspace, new_key: str | None
+):
     return templates.TemplateResponse(
-        request, "keys.html", {"active_key": active_key, "new_key": new_key}
+        request, "keys.html", await _keys_context(session, workspace, new_key)
     )
 
 

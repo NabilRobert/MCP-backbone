@@ -108,6 +108,19 @@ async def write_audit(
     await session.commit()
 
 
+async def record_refusal(
+    session: AsyncSession, workspace: Workspace, sql: str, reason: str
+) -> None:
+    """Audits a data-reading call that was refused before it ran (e.g.
+    by the key's scopes), so the log still shows every attempt. Skipped
+    only if the workspace has no data source to attribute it to."""
+    try:
+        data_source = await get_data_source(session, workspace)
+    except QueryExecutionError:
+        return
+    await write_audit(session, workspace, data_source, sql, "rejected", None, reason)
+
+
 def visible_table_names(sync_conn: Any) -> list[str]:
     """Table names an AI client should see: every table in the current
     schema except the partitions of a partitioned table. Querying the

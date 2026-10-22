@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ARRAY, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.auth.scopes import ALL_TOOLS
 from app.db import Base
 
 # These classes each describe one database table -- SQLAlchemy
@@ -44,6 +45,13 @@ class ApiKey(Base):
     status: Mapped[str]
     created_at: Mapped[datetime]
     revoked_at: Mapped[datetime | None]
+    # The MCP tools this key may call (app/auth/scopes.py). Every key made
+    # before scopes existed, and every key made without choosing, gets all.
+    scopes: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        default=lambda: list(ALL_TOOLS),
+        server_default="{" + ",".join(ALL_TOOLS) + "}",
+    )
 
 
 class ConsoleCredential(Base):

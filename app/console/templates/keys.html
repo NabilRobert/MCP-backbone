@@ -7,8 +7,13 @@
   <p class="key-box">{{ new_key }}</p>
 {% endif %}
 
+{% if error %}
+  <p class="error">{{ error }}</p>
+{% endif %}
+
 {% if active_key %}
   <p>Status: <strong>active</strong></p>
+  <p>Access: <strong>{{ access_label }}</strong></p>
   <p>Created: {{ active_key.created_at }}</p>
   <form class="inline" method="post" action="/console/keys/revoke"
         onsubmit="return confirm('Revoke the current API key? Any AI client using it will stop working immediately.');">
@@ -18,8 +23,19 @@
   <p>Status: <strong>no active key</strong></p>
 {% endif %}
 
-<form class="inline" method="post" action="/console/keys/rotate"
+<form method="post" action="/console/keys/rotate"
       onsubmit="return confirm('Issue a new key? This revokes the current one immediately.');">
+  <p>
+    <label>Access for the new key:
+      <select name="access">
+        {% for name, label in presets.items() %}
+          <option value="{{ name }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </p>
+  <p>Give a key only what its client needs: something that only browses
+    the schema doesn't need to read rows.</p>
   <button type="submit">{{ "Issue a new key" if active_key else "Issue a key" }}</button>
 </form>
 
