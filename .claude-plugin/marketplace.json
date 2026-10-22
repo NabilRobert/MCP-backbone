@@ -1,0 +1,15 @@
+{
+  "name": "mcp-backbone",
+  "description": "The Database MCP Server plugin: read-only, validated, audit-logged SQL access for Claude Code.",
+  "owner": {
+    "name": "NabilRobert",
+    "url": "https://github.com/NabilRobert"
+  },
+  "plugins": [
+    {
+      "name": "mcp-backbone",
+      "source": "./plugin",
+      "description": "Explore a database's schema and run safe, read-only SQL against it through a deployed MCP-backbone server."
+    }
+  ]
+}

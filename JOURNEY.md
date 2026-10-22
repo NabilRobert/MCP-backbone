@@ -1156,3 +1156,32 @@ very next page bounces back to the login screen. One new test pins
 exactly that behavior (session survives over https, not over http), so
 that requirement is documented by the tests, not just here. Another
 checks the flag appears on the cookie only when the setting is on.
+
+## 2026-10-22 — Packaged as a Claude Code plugin
+
+Until now, using this from Claude Code meant a hand-typed `claude mcp add`
+with the key pasted into a local config, which can't be shared. `plugin/`
+is now a real plugin and the repo is its own marketplace. The manifest
+declares the server URL and API key as `userConfig`, so Claude Code prompts
+for them at install, and the key (marked `sensitive`) goes to the OS
+credential store instead of `settings.json`. `.mcp.json` turns those two
+values into the HTTP server registration and its Bearer header. The
+header auth added for the HTTP transport is what makes this possible
+without a wrapper.
+
+Tested by actually installing it, not just validating the manifest. Both
+manifests pass `claude plugin validate --strict`. The plugin was installed
+from a local marketplace and configured, with the key piped in from `.env`
+on stdin so it never appeared in a command line or output. From a folder
+where the old hand-added registration isn't loaded, `claude mcp list` showed
+`plugin:mcp-backbone:database` connected. That alone proves little,
+because the server only checks the key when a tool is called. So a
+headless session then called `list_tables` with no `api_key` argument and
+got the real Pagila table list back.
+
+The plugin also ships a `query-database` skill. In an end-to-end run ("which
+film category has the most films?") it triggered on its own, explored the
+schema first, and answered with a single `run_query`. The same run
+surfaced a real gap: Claude guessed `describe_table`'s argument as `table`
+instead of `table_name` and wasted two calls before correcting itself. The
+skill now lists each tool's real argument names.

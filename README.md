@@ -154,6 +154,33 @@ cd static-src && npm ci && npm run build
 CI rebuilds it on every push and fails if the committed copy doesn't
 match, so the two can't drift apart.
 
+## Using it from Claude Code: the plugin
+
+`plugin/` is a Claude Code plugin, and this repo is its marketplace. It
+registers a running server's `/mcp/` endpoint as an MCP server (sending the
+API key as an `Authorization: Bearer` header) and adds a `query-database`
+skill that tells Claude how to use the four tools well. For example: explore
+the schema for free first, spend the rate-limited `run_query` calls only on
+the final query, and how to react to each kind of rejection.
+
+```
+/plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
+```
+
+or, from a shell:
+
+```
+claude plugin marketplace add NabilRobert/MCP-backbone
+claude plugin install mcp-backbone@mcp-backbone
+```
+
+Claude Code then asks for two values: the server URL (defaults to this
+project's own deployment, `https://mcp.my.id:8443/mcp/`) and an API key that
+server issued (`scripts/seed_workspace.py`, or rotated from the console). The
+key is marked sensitive, so it goes to your OS credential store, not
+`settings.json`. The plugin can't create a key itself: only the server can
+issue one, and it stores just a hash of it.
+
 ## Running tests: the `APP_DATABASE_URL` privilege requirement
 
 This isn't a local-vs-remote thing -- it's about privilege level.

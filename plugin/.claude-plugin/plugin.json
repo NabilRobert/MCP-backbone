@@ -1,0 +1,29 @@
+{
+  "name": "mcp-backbone",
+  "displayName": "Database MCP Server",
+  "version": "0.1.0",
+  "description": "Explore a database's schema and run safe, read-only SQL against it through a deployed MCP-backbone server. Every query is validated, cost-checked and audit-logged server-side.",
+  "author": {
+    "name": "NabilRobert",
+    "url": "https://github.com/NabilRobert"
+  },
+  "homepage": "https://github.com/NabilRobert/MCP-backbone",
+  "repository": "https://github.com/NabilRobert/MCP-backbone",
+  "keywords": ["database", "postgres", "sql", "mcp", "read-only"],
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Server URL",
+      "description": "The MCP endpoint of a running MCP-backbone server, ending in /mcp/",
+      "default": "https://mcp.my.id:8443/mcp/",
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API key",
+      "description": "A workspace API key issued by that server (scripts/seed_workspace.py, or rotated from its web console)",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

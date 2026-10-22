@@ -174,6 +174,21 @@ setting things up:
   restarts the service.
 - **`crontab`** — the one cron line that runs the nightly backup.
 
+## `plugin/`: the Claude Code plugin
+
+None of this runs on the server. It's what a Claude Code user installs to
+connect to it (the repo root's `.claude-plugin/marketplace.json` is what
+makes the repo installable by name):
+- **`.claude-plugin/plugin.json`**: the manifest. Declares two
+  `userConfig` values Claude Code prompts for at install: the server URL and
+  the API key (`sensitive`, so it's kept in the OS credential store).
+- **`.mcp.json`**: registers the server as an HTTP MCP server, filling the
+  URL and the `Authorization: Bearer` header from those two values.
+- **`skills/query-database/SKILL.md`**: how Claude should use the tools.
+  Explore with the free schema tools first, spend the rate-limited
+  `run_query` on the final query, and what to do with each kind of
+  rejection.
+
 ## `tests/` mirrors `app/`
 
 Each test file matches the thing it's testing — `test_validation.py`
