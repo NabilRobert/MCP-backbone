@@ -55,6 +55,7 @@
 **Consequences:** All modules deploy together; simpler ops and debugging.
 **Revisit if:** A module needs independent scaling, or a separate team takes
 ownership — neither expected here.
+**Sources:** Martin Fowler, [MonolithFirst](https://martinfowler.com/bliki/MonolithFirst.html).
 
 ### ADR-002: No Redis/Celery for v1
 **Context:** Nothing in v1 is long-running; rate limiting and schema caching
@@ -68,6 +69,7 @@ decision itself (back-of-envelope reasoning about what's actually needed) is
 the intended signal instead.
 **Revisit if:** The post-v1 live/streaming monitoring phase needs pub/sub —
 that's the point this becomes load-bearing.
+**Sources:** none external; the reasoning is the back-of-envelope above.
 
 ### ADR-003: Server-rendered console, not a SPA
 **Context:** ~1-week timeline, solo build; the console only needs a login, a
@@ -82,6 +84,9 @@ CORS between separate frontend/backend), same user-visible result at this
 scope.
 **Revisit if:** The richer post-v1 visualization app needs real frontend
 state management — that's the natural point to introduce a framework.
+**Sources:** OWASP, [CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+(same-origin forms with `SameSite=Strict` cookies, the console's CSRF
+defense, are only this simple because there's no separate SPA origin).
 
 ### ADR-004: Connection strings are operator-set only
 **Context:** The original vision was self-serve "connect to any database via
@@ -96,6 +101,7 @@ not yet delivering self-serve "any database" setup.
 need connection-string validation (blocking private IP ranges, metadata
 endpoints) before being exposed again.
 **Status:** Superseded by ADR-007 (2026-10-22).
+**Sources:** OWASP, [SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
 
 ### ADR-005: Secrets via environment variables, no secrets manager
 **Context:** Solo maintainer, small scale, no real external users' credentials
@@ -105,6 +111,13 @@ variables, not a dedicated secrets manager (Vault, etc.).
 **Consequences:** Simple, no extra infra. Acceptable at this trust level.
 **Revisit if:** This system ever handles real external users' credentials, or
 runs at a scale/trust level where env-var secrets become a real risk.
+**Status:** The "revisit" condition was met when invited users could supply
+their own database credentials (ADR-007). Those are now encrypted at rest
+with a key that stays in the environment (THREAT_MODEL T8); the key itself
+still lives in an env var, which is this ADR's tradeoff unchanged.
+**Sources:** [The Twelve-Factor App: Config](https://12factor.net/config);
+OWASP, [Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html);
+[cryptography: Fernet](https://cryptography.io/en/latest/fernet/).
 
 ### ADR-006: PydanticAI for the Slice E benchmark's test-agent loop
 **Context:** The text-to-SQL benchmark (Slice E) needs an LLM-driven client
@@ -124,6 +137,7 @@ through the actual protocol. Adds one dependency, isolated to an optional
 `benchmark` extra so the core server install stays untouched.
 **Revisit if:** PydanticAI's MCP client behavior diverges from the official
 SDK's in some edge case the benchmark depends on.
+**Sources:** [PydanticAI: MCP client](https://ai.pydantic.dev/mcp/client/).
 
 ### ADR-007: Invite-only self-serve workspaces, with user-supplied connections
 **Context:** The server is installable as a Claude Code plugin, so other
@@ -152,6 +166,9 @@ What's left is account spam multiplying the per-workspace rate limits,
 capped per client IP and per day. Connecting your own database still needs
 an invite. A fully gated demo would have protected little and made the
 project impossible to try.
+**Sources:** OWASP, [SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
+(allowlisting by resolved address, and DNS rebinding as the known gap);
+[cryptography: Fernet](https://cryptography.io/en/latest/fernet/).
 
 ### ADR-008: API keys over the MCP authorization flow (OAuth), for now
 **Context:** The MCP specification defines an OAuth 2.1 authorization flow
@@ -173,6 +190,67 @@ shared or leaked, or the server needs to act on behalf of an external
 identity provider's accounts. The plugin and the `Authorization: Bearer`
 header would carry over unchanged; only how the token is obtained
 changes.
+**Sources:** [MCP specification: Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization);
+[MCP specification: Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+(its DNS-rebinding requirement is why the server checks `Host` and
+`Origin`).
+
+### ADR-009: Read-only enforced in layers, not by one mechanism
+**Context:** The server's core promise is that an AI client can never
+change data. Each available mechanism has a known hole.
+**Options:** (a) Validate the SQL in the app only. (b) Rely on a read-only
+database role only. (c) Run every transaction `READ ONLY` only. (d) All
+three.
+**Decision:** All three, with each one's gap covered by another:
+- **The validator** (sqlglot parse tree, one `SELECT`, a function
+  allowlist, an `EXPLAIN` cost check) stops writes before the database is
+  touched, but it's app code, so a parser bug is a hole.
+- **A read-only role** can't be switched off by a query, but a
+  `SECURITY DEFINER` function runs with its owner's privileges and can
+  still write, and some hosts can't create roles at all.
+- **`READ ONLY` transactions** stop even a `SECURITY DEFINER` write and
+  need no permissions, but a separate `SET TRANSACTION READ WRITE`
+  could undo one, which needs a way past the validator first.
+**Consequences:** No single bug or misconfiguration makes the server
+writable. The red-team suite tests the database layers *bypassing* the
+validator, so each layer's claim is proven on its own.
+**Revisit if:** the server ever needs to support writes, which would
+replace this ADR rather than amend it.
+**Sources:** PostgreSQL docs: [SET TRANSACTION](https://www.postgresql.org/docs/current/sql-set-transaction.html),
+[CREATE FUNCTION](https://www.postgresql.org/docs/current/sql-createfunction.html)
+("Writing SECURITY DEFINER Functions Safely"),
+[Privileges](https://www.postgresql.org/docs/current/ddl-priv.html),
+[Schemas](https://www.postgresql.org/docs/current/ddl-schemas.html) and the
+[15.0 release notes](https://www.postgresql.org/docs/release/15.0/) (PUBLIC
+lost `CREATE` on `public`, which Pagila's dump re-grants),
+[Using EXPLAIN](https://www.postgresql.org/docs/current/using-explain.html),
+[statement_timeout](https://www.postgresql.org/docs/current/runtime-config-client.html);
+[sqlglot](https://sqlglot.com/sqlglot.html);
+[PgBouncer features](https://www.pgbouncer.org/features.html) (why
+transaction-scoped `READ ONLY` and no prepared statements, behind
+transaction pooling).
+
+### ADR-010: Benchmark graded by execution accuracy, strict and lenient
+**Context:** The text-to-SQL benchmark has to say whether the agent's
+answer was right. Many different SQL queries are equally correct.
+**Options:** (a) Compare SQL text to a reference query. (b) Compare the
+rows the agent's query returned (execution accuracy). (c) Ask another
+model to judge.
+**Decision:** Execution accuracy, reported twice: strictly (exactly the
+asked columns and values) and leniently (numbers within 0.005, extra
+columns allowed). Both are published side by side, so the lenient score
+never has to be taken on trust.
+**Alternatives rejected:** SQL-text matching fails correct answers that
+use a different alias or join order. A model judge adds its own error
+and cost, and makes the score hard to reproduce.
+**Consequences:** The questions must have one unambiguous answer, so each
+one is checked against the data first (no ties at a top-N cut-off, time
+zones stated). One question still turned out ambiguous; it's recorded in
+`BENCHMARK.md` rather than re-scored. Hand-written questions on Pagila
+aren't comparable to public leaderboard scores.
+**Sources:** Yu et al., [Spider](https://arxiv.org/abs/1809.08887) (2018);
+Li et al., [BIRD](https://arxiv.org/abs/2305.03111) (2023), whose headline
+metric is execution accuracy.
 
 ## Reversible vs. irreversible
 

@@ -248,6 +248,10 @@ point out text that looks like instructions rather than act on it. Models
 follow such guidance most of the time, not always, which is why the
 guarantees above don't depend on it.
 
+Source: OWASP Top 10 for LLM Applications, [LLM01: Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
+(this is its "indirect" form: the instructions arrive in data the model
+reads, not in the user's prompt).
+
 ## What this does *not* defend against (stated honestly, not hand-waved)
 
 - **A compromised operator machine or server.** Secrets (the bookkeeping
