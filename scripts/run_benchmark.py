@@ -39,7 +39,6 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.mcp import CallToolFunc, MCPToolset
 from pydantic_ai.messages import ModelMessage, ToolCallPart, ToolReturnPart
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 # app/config.py's Settings reads .env for the app's own APP_* variables,
 # but that doesn't put anything into the process environment for OTHER
@@ -52,7 +51,7 @@ load_dotenv()
 from app.auth.service import authenticate
 from app.benchmark.grading import rows_equal, rows_equal_strict
 from app.benchmark.models import BenchmarkResult, EvalCase
-from app.db import SessionLocal
+from app.db import SessionLocal, create_target_engine
 from app.mcp.server import mcp
 from app.query.service import get_data_source
 
@@ -140,7 +139,10 @@ async def _ground_truth(connection_url: str, sql: str) -> list[dict[str, Any]]:
     """Runs the hand-written "known correct" SQL for one question
     directly against the database, bypassing the AI agent entirely. This
     is the answer key we grade the agent's own query against."""
-    engine = create_async_engine(connection_url)
+    # The same factory the server uses: forces the asyncpg driver (a bare
+    # "postgresql://" URL otherwise picks psycopg, which isn't installed)
+    # and keeps the answer key's own queries read-only too.
+    engine = create_target_engine(connection_url)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(text(sql))
