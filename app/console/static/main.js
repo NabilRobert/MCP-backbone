@@ -41,61 +41,65 @@
     const parts = Array.from(counts.entries()).map(([status, count]) => `${status}: ${count}`);
     el.textContent = parts.length > 0 ? `Showing ${rows.length}: ${parts.join(" / ")}` : "";
   }
+  var CHART = { width: 640, height: 140, labelSpace: 18, barGap: 4 };
+  function svgElement(tag, attributes) {
+    const element = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, String(value));
+    }
+    return element;
+  }
+  function failedCount(day) {
+    return day.rejected + day.errored + day.timed_out;
+  }
   function renderChart(days, container) {
-    const width = 640;
-    const height = 140;
-    const labelSpace = 18;
-    const barGap = 4;
-    const barWidth = width / days.length - barGap;
-    const totals = days.map((d) => d.succeeded + d.rejected + d.errored + d.timed_out);
-    const max = Math.max(1, ...totals);
-    const svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute("role", "img");
-    svg.setAttribute(
-      "aria-label",
-      `Queries per day for the last ${days.length} days: ${totals.reduce((a, b) => a + b, 0)} in total`
-    );
+    const barWidth = CHART.width / days.length - CHART.barGap;
+    const plotHeight = CHART.height - CHART.labelSpace;
+    const totals = days.map((day) => day.succeeded + failedCount(day));
+    const scale = plotHeight / Math.max(1, ...totals);
+    const svg = svgElement("svg", {
+      viewBox: `0 0 ${CHART.width} ${CHART.height}`,
+      role: "img",
+      "aria-label": `Queries per day for the last ${days.length} days: ${totals.reduce((a, b) => a + b, 0)} in total`
+    });
     days.forEach((day, i) => {
-      const x = i * (barWidth + barGap);
-      const failed = day.rejected + day.errored + day.timed_out;
-      const plot = height - labelSpace;
-      const okHeight = day.succeeded / max * plot;
-      const failedHeight = failed / max * plot;
-      for (const [value, barHeight, y, cls] of [
-        [day.succeeded, okHeight, plot - okHeight, "bar-ok"],
-        [failed, failedHeight, plot - okHeight - failedHeight, "bar-failed"]
-      ]) {
-        if (value === 0) continue;
-        const rect = document.createElementNS(SVG_NS, "rect");
-        rect.setAttribute("x", String(x));
-        rect.setAttribute("y", String(y));
-        rect.setAttribute("width", String(barWidth));
-        rect.setAttribute("height", String(barHeight));
-        rect.setAttribute("class", cls);
-        const title = document.createElementNS(SVG_NS, "title");
-        title.textContent = `${day.date}: ${day.succeeded} succeeded, ${failed} not`;
+      const x = i * (barWidth + CHART.barGap);
+      const tooltip = `${day.date}: ${day.succeeded} succeeded, ${failedCount(day)} not`;
+      const okHeight = day.succeeded * scale;
+      const failedHeight = failedCount(day) * scale;
+      const addBar = (height, top, className) => {
+        if (height === 0) return;
+        const rect = svgElement("rect", { x, y: top, width: barWidth, height, class: className });
+        const title = svgElement("title", {});
+        title.textContent = tooltip;
         rect.appendChild(title);
         svg.appendChild(rect);
-      }
+      };
+      addBar(okHeight, plotHeight - okHeight, "bar-ok");
+      addBar(failedHeight, plotHeight - okHeight - failedHeight, "bar-failed");
       if (i % 2 === 0 || i === days.length - 1) {
-        const label = document.createElementNS(SVG_NS, "text");
-        label.setAttribute("x", String(x + barWidth / 2));
-        label.setAttribute("y", String(height - 4));
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("class", "bar-label");
+        const label = svgElement("text", {
+          x: x + barWidth / 2,
+          y: CHART.height - 4,
+          "text-anchor": "middle",
+          class: "bar-label"
+        });
         label.textContent = day.date.slice(5);
         svg.appendChild(label);
       }
     });
     container.replaceChildren(svg);
   }
+  function inputValue(id) {
+    const element = document.getElementById(id);
+    return element instanceof HTMLInputElement || element instanceof HTMLSelectElement ? element.value.trim() : "";
+  }
   function currentFilters() {
     const params = new URLSearchParams();
-    const status = document.getElementById("filter-status")?.value;
-    const search = document.getElementById("filter-search")?.value;
+    const status = inputValue("filter-status");
+    const search = inputValue("filter-search");
     if (status) params.set("status", status);
-    if (search?.trim()) params.set("q", search.trim());
+    if (search) params.set("q", search);
     return params;
   }
   async function refreshDashboard() {
