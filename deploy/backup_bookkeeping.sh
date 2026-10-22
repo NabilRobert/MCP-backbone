@@ -2,15 +2,27 @@
 # Nightly dump of the local MCP bookkeeping database. Keeps the last 14
 # locally, and an age-encrypted copy of the last 14 in S3 (off-server).
 #
-# Deployed on the VPS as ~/bin/backup_bookkeeping.sh, run by cron daily at
+# Deployed on the VPS as ~/bin/backup_bookkeeping.sh (see deploy/RUNBOOK.md), run by cron daily at
 # 03:17. Every secret comes from ~/MCP-backbone/.env at run time; nothing
 # sensitive lives in this file. The age public key below can only encrypt;
 # the matching private key is kept off the VPS.
+#
+# Alerting (optional): set BACKUP_HEALTHCHECK_URL in .env to a dead-man's-
+# switch check, e.g. a free healthchecks.io check scheduled daily. The
+# script pings <url>/start, then <url> on success or <url>/fail on any
+# error, so you're emailed if a backup fails OR silently never runs.
 set -euo pipefail
 umask 077
 
 BACKUP_DIR="$HOME/backups"
 ENV_FILE="$HOME/MCP-backbone/.env"
+
+HC_URL="$(grep '^BACKUP_HEALTHCHECK_URL=' "$ENV_FILE" | cut -d= -f2- || true)"
+ping_hc() {
+  if [ -n "$HC_URL" ]; then curl -fsS -m 10 --retry 3 "$HC_URL$1" >/dev/null || true; fi
+}
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then ping_hc /fail; fi' EXIT
+ping_hc /start
 
 require() {
   local v
@@ -55,3 +67,5 @@ ls -1t "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.dump.age | tail -n +15 | xargs -r 
 rclone lsf "$REMOTE" --files-only --include 'jarvis_mcp_bookkeeping-*.dump.age' \
   | sort -r | tail -n +15 \
   | xargs -r -I{} rclone deletefile "$REMOTE/{}"
+
+ping_hc ""

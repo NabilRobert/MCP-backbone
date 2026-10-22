@@ -217,6 +217,11 @@ setting things up:
   `APP_TARGET_DATABASE_URL` at it. Stops before touching the app if any
   check fails.
 - **`crontab`** — the one cron line that runs the nightly backup.
+- **`firewall.sh`** — the host firewall (ufw): 22/80/443 open, 8443 only
+  from Caddy's Docker network, everything else dropped. Schedules its own
+  undo before enabling, and rolls back if Caddy loses the app.
+- **`RUNBOOK.md`** — routine operations, monitoring setup, restore, and a
+  rebuild-from-nothing checklist.
 
 ## `plugin/`: the Claude Code plugin
 
@@ -271,9 +276,6 @@ fixing it. `README.md` is the front door to all of that.
   own Postgres with a real read-only role. A workspace's *own* database
   (invite signups) still gets only the role the user supplies; signup
   warns when that login can write.
-- The VPS's cloud firewall (the provider's security group) appears
-  wide open: ports 8000 and 8443 were both reachable without any rule
-  being added. Nothing sensitive listens publicly today (the local
-  Postgres binds to `127.0.0.1` only), but any future service bound to
-  `0.0.0.0` on that machine would be exposed. Worth restricting it in
-  the provider console to 22, 80/443 (the other site) and 8443.
+- The VPS provider's own firewall is wide open, so the host firewall
+  (`deploy/firewall.sh`) is the only filter. Docker-published ports bypass
+  it, so a port that a container publishes is reachable regardless.

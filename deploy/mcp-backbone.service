@@ -3,10 +3,11 @@
 #          sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
 # Secrets: none here. The app reads .env from WorkingDirectory.
 #
-# Public traffic arrives two ways: https://mcp.my.id (port 443) through the
-# Caddy reverse proxy that also serves the unrelated Tamara site (see
-# deploy/caddy-mcp.caddyfile), and directly on 8443. uvicorn terminates TLS
-# itself on 8443 for both. The cert comes from Let's Encrypt
+# Public traffic arrives at https://mcp.my.id (port 443) through the Caddy
+# reverse proxy that also serves the unrelated Tamara site (see
+# deploy/caddy-mcp.caddyfile), which forwards to uvicorn on 8443. With
+# deploy/firewall.sh applied, 8443 accepts connections only from Caddy's
+# Docker network. uvicorn terminates TLS itself on 8443. The cert comes from Let's Encrypt
 # via a Cloudflare DNS-01 challenge. certbot renews it, and
 # deploy/certbot-deploy-hook.sh copies it to /etc/mcp-backbone/tls/ (this
 # service runs as ubuntu, which can't read /etc/letsencrypt/live) and
