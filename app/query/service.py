@@ -130,8 +130,9 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     through every safety check in order, actually executes it if it
     passes, and always writes down what happened. Returns a dict with
     status ("succeeded"/"rejected"/"errored"/"timed_out"), the resulting
-    rows (empty unless it succeeded), and an error message (empty unless
-    something went wrong)."""
+    rows (empty unless it succeeded; at most APP_MAX_RESULT_ROWS), and an
+    error message (empty unless something went wrong). A result cut off
+    at the cap also carries truncated=True and a note saying so."""
     data_source = await get_data_source(session, workspace)
 
     # Step 1: has this workspace made too many requests recently? This
@@ -159,6 +160,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     error_message: str | None = None
     cost: float | None = None
     rows: list[dict[str, Any]] = []
+    truncated = False
 
     engine = create_target_engine(data_source.connection_url)
     try:
@@ -192,10 +194,19 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
             # CONNECTION itself dropped (see TRANSIENT_EXCEPTIONS above).
             for attempt in range(1, MAX_ATTEMPTS + 1):
                 try:
-                    result = await conn.execute(text(normalized_sql))
+                    # Streamed through a server-side cursor and cut off at
+                    # the cap: the cost check limits how expensive a query
+                    # is, not how big its result is, and a cheap
+                    # "select * from rental" is 16,000 rows -- far too many
+                    # to hand an AI model. One extra row is fetched only to
+                    # tell "exactly at the cap" from "cut off".
+                    result = await conn.stream(text(normalized_sql))
+                    fetched = await result.fetchmany(settings.max_result_rows + 1)
+                    await result.close()
+                    truncated = len(fetched) > settings.max_result_rows
                     rows = [
                         dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
-                        for row in result
+                        for row in fetched[: settings.max_result_rows]
                     ]
                     break  # success -- stop trying
                 except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
@@ -220,4 +231,11 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     # Step 5: no matter what happened above, write it to the audit log
     # before telling the caller the result.
     await write_audit(session, workspace, data_source, sql, status, cost, error_message)
-    return {"status": status, "rows": rows, "error": error_message}
+    response: dict[str, Any] = {"status": status, "rows": rows, "error": error_message}
+    if truncated:
+        response["truncated"] = True
+        response["note"] = (
+            f"Only the first {settings.max_result_rows} rows are returned. "
+            "Aggregate, filter, or add a LIMIT to get a complete answer."
+        )
+    return response

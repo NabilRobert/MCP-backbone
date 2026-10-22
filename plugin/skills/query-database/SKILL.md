@@ -35,6 +35,10 @@ already sends the key as a header, and the server ignores the argument over HTTP
    where you can.
 3. **Answer in plain language** first, then show the SQL you ran.
 
+`run_query` returns at most 200 rows by default. If a result was cut off, the
+response has `truncated: true` and a note. Don't answer a "how many" or
+"total" question from a truncated list: aggregate in SQL instead.
+
 ## When `run_query` is rejected
 
 The error message says why. Fix the cause before you retry, and don't resend

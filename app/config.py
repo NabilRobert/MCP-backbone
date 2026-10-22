@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # actual measurements behind this number and a known gap it
     # doesn't close.
     cost_threshold: int = 40_000
+    # Most rows run_query returns. The cost check bounds how expensive a
+    # query is, not how big its result is; this bounds what reaches the AI.
+    max_result_rows: int = 200
     demo_rate_limit: int = 5  # max run_query calls per workspace per window
     demo_rate_limit_window_seconds: int = 3600  # how long that window is
     # sample_rows returns real data too, so it's audited and limited as
