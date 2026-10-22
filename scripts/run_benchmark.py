@@ -27,8 +27,10 @@ cost to run this.
 
 import argparse
 import asyncio
+import datetime
 import os
 import time
+from pathlib import Path
 from typing import Any, cast
 
 from dotenv import load_dotenv
@@ -48,7 +50,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 load_dotenv()
 
 from app.auth.service import authenticate
-from app.benchmark.grading import rows_equal
+from app.benchmark.grading import rows_equal, rows_equal_strict
 from app.benchmark.models import BenchmarkResult, EvalCase
 from app.db import SessionLocal
 from app.mcp.server import mcp
@@ -185,7 +187,7 @@ def _extract_last_run_query_call(
     return None, None
 
 
-async def run(api_key: str) -> None:
+async def run(api_key: str, report_path: str | None) -> None:
     # Step 1: figure out which workspace this API key belongs to, and
     # which real database it's allowed to query -- same lookup the MCP
     # server itself does on every request.
@@ -198,17 +200,19 @@ async def run(api_key: str) -> None:
     if not eval_cases:
         raise SystemExit("No eval cases found -- run scripts/seed_eval_cases.py first.")
 
-    # Step 2: set up the AI agent. toolset connects it to our own MCP
-    # server (so it uses the exact same safety-checked tools a real AI
-    # client would); process_tool_call is the API-key injection from
-    # above.
+    # Step 2: the agent, connected to this project's own MCP server (the
+    # same safety-checked tools a real client uses), with the API key
+    # injected into every call so the model never sees it.
     model = _build_model()
+    model_name = os.environ.get("AI_MODEL", "")
     toolset = MCPToolset(Client(mcp), process_tool_call=_make_api_key_injector(api_key))
     agent = Agent(model, instructions=AGENT_INSTRUCTIONS, toolsets=[toolset])
+    run_started_at = datetime.datetime.now(datetime.UTC)
 
-    # Step 3: ask the agent every question, one at a time, and grade
-    # each answer against the known-correct result.
-    correct_count = 0
+    # Step 3: ask every question and grade each answer twice: leniently
+    # (rows_equal: rounding within 0.005 and extra columns tolerated) and
+    # strictly (rows_equal_strict: exactly the asked columns and values).
+    outcomes: list[dict[str, Any]] = []
     async with SessionLocal() as session:
         for case in eval_cases:
             expected_rows = await _ground_truth(target_connection_url, case.expected_sql)
@@ -218,26 +222,108 @@ async def run(api_key: str) -> None:
             elapsed = time.monotonic() - start
 
             actual_sql, actual_rows = _extract_last_run_query_call(result.all_messages())
-            correct = actual_rows is not None and rows_equal(actual_rows, expected_rows)
-            correct_count += int(correct)
-
-            # Record this attempt permanently, same as every real query
-            # this server ever runs gets audited -- the benchmark's own
-            # results are tracked the same honest way.
+            lenient = actual_rows is not None and rows_equal(actual_rows, expected_rows)
+            strict = actual_rows is not None and rows_equal_strict(actual_rows, expected_rows)
+            outcomes.append(
+                {
+                    "case": case,
+                    "lenient": lenient,
+                    "strict": strict,
+                    "sql": actual_sql,
+                    "elapsed": elapsed,
+                }
+            )
             session.add(
                 BenchmarkResult(
                     eval_case_id=case.id,
                     actual_sql=actual_sql or "<no successful run_query call>",
-                    correct=correct,
+                    correct=lenient,
+                    strict_correct=strict,
+                    model=model_name,
+                    run_started_at=run_started_at,
                 )
             )
             await session.commit()
 
-            status = "PASS" if correct else "FAIL"
-            print(f"[{status}] ({elapsed:.1f}s) {case.question}")
+            marks = f"{'PASS' if lenient else 'FAIL'}/{'PASS' if strict else 'FAIL'}"
+            print(f"[{marks}] ({elapsed:.1f}s) [{case.difficulty}] {case.question}")
             print(f"       actual SQL: {actual_sql!r}")
 
-    print(f"\n{correct_count}/{len(eval_cases)} correct ({correct_count / len(eval_cases):.0%})")
+    summary = _summarise(outcomes)
+    print()
+    for label, (lenient, strict, total) in summary.items():
+        print(f"{label:8} lenient {lenient}/{total}  strict {strict}/{total}")
+    if report_path:
+        _write_report(report_path, outcomes, summary, model_name, run_started_at)
+        print(f"\nReport written to {report_path}")
+
+
+def _summarise(outcomes: list[dict[str, Any]]) -> dict[str, tuple[int, int, int]]:
+    """(lenient passes, strict passes, total) per difficulty, then overall."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for outcome in outcomes:
+        groups.setdefault(outcome["case"].difficulty, []).append(outcome)
+    order = ["easy", "medium", "hard", "unrated"]
+    summary = {
+        name: (
+            sum(o["lenient"] for o in groups[name]),
+            sum(o["strict"] for o in groups[name]),
+            len(groups[name]),
+        )
+        for name in sorted(groups, key=lambda n: order.index(n) if n in order else len(order))
+    }
+    summary["overall"] = (
+        sum(o["lenient"] for o in outcomes),
+        sum(o["strict"] for o in outcomes),
+        len(outcomes),
+    )
+    return summary
+
+
+def _write_report(
+    path: str,
+    outcomes: list[dict[str, Any]],
+    summary: dict[str, tuple[int, int, int]],
+    model_name: str,
+    run_started_at: datetime.datetime,
+) -> None:
+    lines = [
+        "# Benchmark results",
+        "",
+        (
+            f"Model `{model_name}`, run {run_started_at:%Y-%m-%d %H:%M} UTC, "
+            f"{len(outcomes)} questions. Generated by `scripts/run_benchmark.py --report`."
+        ),
+        "",
+        (
+            "Each answer is graded by execution accuracy (the rows the agent's query returned, "
+            "not its SQL text) twice:"
+        ),
+        "",
+        (
+            "- **Strict:** exactly the asked columns, in order, with exactly equal values "
+            "(`rows_equal_strict`)."
+        ),
+        "- **Lenient:** also accepts numbers within 0.005 and extra columns (`rows_equal`).",
+        "",
+        "| | Strict | Lenient |",
+        "|---|---|---|",
+    ]
+    for label, (lenient, strict, total) in summary.items():
+        name = f"**{label}**" if label == "overall" else label
+        lines.append(f"| {name} | {strict}/{total} | {lenient}/{total} |")
+    lines += [
+        "",
+        "| # | Difficulty | Question | Strict | Lenient | Agent's SQL |",
+        "|---|---|---|---|---|---|",
+    ]
+    for n, o in enumerate(outcomes, 1):
+        sql = (o["sql"] or "(no successful query)").replace("|", "\\|").replace("\n", " ")
+        lines.append(
+            f"| {n} | {o['case'].difficulty} | {o['case'].question} | "
+            f"{'✓' if o['strict'] else '✗'} | {'✓' if o['lenient'] else '✗'} | `{sql}` |"
+        )
+    Path(path).write_text("\n".join(lines) + "\n")
 
 
 def main() -> None:
@@ -247,9 +333,10 @@ def main() -> None:
         required=True,
         help="A workspace's API key, shown once when scripts/seed_workspace.py ran.",
     )
+    parser.add_argument("--report", help="Also write a Markdown report to this path.")
     args = parser.parse_args()
 
-    asyncio.run(run(args.api_key))
+    asyncio.run(run(args.api_key, args.report))
 
 
 if __name__ == "__main__":

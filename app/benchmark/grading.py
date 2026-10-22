@@ -92,3 +92,17 @@ def rows_equal(actual: list[dict[str, Any]], expected: list[dict[str, Any]]) -> 
             return False
         unmatched_actual.pop(match_index)
     return True
+
+
+def rows_equal_strict(actual: list[dict[str, Any]], expected: list[dict[str, Any]]) -> bool:
+    """The no-tolerance score, reported next to rows_equal so the lenient
+    one never has to be taken on trust: the same number of columns, in
+    the same order, with exactly equal values (no rounding slack), and
+    the same rows in any order. The only normalisation is the
+    Decimal-vs-JSON-string one in _normalize_value, which fixes how a
+    value is *represented*, not whether it's right."""
+    actual_rows = sorted(repr(tuple(_normalize_value(v) for v in row.values())) for row in actual)
+    expected_rows = sorted(
+        repr(tuple(_normalize_value(v) for v in row.values())) for row in expected
+    )
+    return actual_rows == expected_rows

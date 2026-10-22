@@ -94,3 +94,20 @@ def test_extra_column_and_rounding_together_still_matches() -> None:
     actual = [{"customer_id": 42, "total_spent": "1234.56"}]
     expected = [{"total_spent": Decimal("1234.5600000000000000")}]
     assert rows_equal(actual, expected)
+
+
+def test_strict_grading_has_no_tolerance() -> None:
+    from decimal import Decimal
+
+    from app.benchmark.grading import rows_equal, rows_equal_strict
+
+    expected = [{"total": Decimal("358.12")}]
+    assert rows_equal_strict([{"t": "358.12"}], expected)  # JSON string vs Decimal: same value
+    assert not rows_equal_strict([{"t": "358.124"}], expected)  # within lenient's 0.005, not strict
+    assert rows_equal([{"t": "358.124"}], expected)
+    assert not rows_equal_strict([{"id": 526, "t": "358.12"}], expected)  # an extra column
+    assert rows_equal_strict(
+        [{"r": "PG", "n": 194}, {"r": "G", "n": 178}],
+        [{"rating": "G", "count": 178}, {"rating": "PG", "count": 194}],
+    )  # rows in any order, column names don't matter
+    assert not rows_equal_strict([{"n": 194, "r": "PG"}], [{"r": "PG", "n": 194}])  # swapped columns

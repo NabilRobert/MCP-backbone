@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,6 +21,7 @@ class EvalCase(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     question: Mapped[str]
     expected_sql: Mapped[str]
+    difficulty: Mapped[str] = mapped_column(default="unrated", server_default="unrated")
 
 
 class BenchmarkResult(Base):
@@ -32,4 +34,8 @@ class BenchmarkResult(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     eval_case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("eval_cases.id"))
     actual_sql: Mapped[str]
-    correct: Mapped[bool]
+    correct: Mapped[bool]  # lenient score (app/benchmark/grading.py rows_equal)
+    # Nullable: results from before these were recorded don't have them.
+    strict_correct: Mapped[bool | None]
+    model: Mapped[str | None]
+    run_started_at: Mapped[datetime | None]
