@@ -59,6 +59,9 @@ from app.query.service import get_data_source
 # answering questions. This is the only "prompt engineering" in this
 # script -- everything else is enforced by code (the MCP server's own
 # safety checks), not by politely asking the model to behave.
+QUESTION_TIMEOUT_SECONDS = 180
+DIFFICULTY_ORDER = ["easy", "medium", "hard", "unrated"]
+
 AGENT_INSTRUCTIONS = (
     "You answer questions about a database by using the available tools: "
     "list_tables, describe_table, sample_rows, and run_query. Always "
@@ -198,7 +201,14 @@ async def run(api_key: str, report_path: str | None) -> None:
         data_source = await get_data_source(session, workspace)
         target_connection_url = data_source.connection_url
 
-        eval_cases = (await session.execute(select(EvalCase))).scalars().all()
+        eval_cases = sorted(
+            (await session.execute(select(EvalCase))).scalars().all(),
+            key=lambda c: (
+                (DIFFICULTY_ORDER.index(c.difficulty), c.question)
+                if c.difficulty in DIFFICULTY_ORDER
+                else (len(DIFFICULTY_ORDER), c.question)
+            ),
+        )
     if not eval_cases:
         raise SystemExit("No eval cases found -- run scripts/seed_eval_cases.py first.")
 
@@ -220,10 +230,16 @@ async def run(api_key: str, report_path: str | None) -> None:
             expected_rows = await _ground_truth(target_connection_url, case.expected_sql)
 
             start = time.monotonic()
-            result = await agent.run(case.question)
+            try:
+                # A first full run hung for hours on one question (a model
+                # or network call that never returned), so each question
+                # gets a deadline and a hang counts as a failure.
+                result = await asyncio.wait_for(agent.run(case.question), QUESTION_TIMEOUT_SECONDS)
+                actual_sql, actual_rows = _extract_last_run_query_call(result.all_messages())
+            except TimeoutError:
+                actual_sql, actual_rows = f"<timed out after {QUESTION_TIMEOUT_SECONDS}s>", None
             elapsed = time.monotonic() - start
 
-            actual_sql, actual_rows = _extract_last_run_query_call(result.all_messages())
             lenient = actual_rows is not None and rows_equal(actual_rows, expected_rows)
             strict = actual_rows is not None and rows_equal_strict(actual_rows, expected_rows)
             outcomes.append(
@@ -248,8 +264,8 @@ async def run(api_key: str, report_path: str | None) -> None:
             await session.commit()
 
             marks = f"{'PASS' if lenient else 'FAIL'}/{'PASS' if strict else 'FAIL'}"
-            print(f"[{marks}] ({elapsed:.1f}s) [{case.difficulty}] {case.question}")
-            print(f"       actual SQL: {actual_sql!r}")
+            print(f"[{marks}] ({elapsed:.1f}s) [{case.difficulty}] {case.question}", flush=True)
+            print(f"       actual SQL: {actual_sql!r}", flush=True)
 
     summary = _summarise(outcomes)
     print()
@@ -265,7 +281,7 @@ def _summarise(outcomes: list[dict[str, Any]]) -> dict[str, tuple[int, int, int]
     groups: dict[str, list[dict[str, Any]]] = {}
     for outcome in outcomes:
         groups.setdefault(outcome["case"].difficulty, []).append(outcome)
-    order = ["easy", "medium", "hard", "unrated"]
+    order = DIFFICULTY_ORDER
     summary = {
         name: (
             sum(o["lenient"] for o in groups[name]),
