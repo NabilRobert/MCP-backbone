@@ -1356,3 +1356,16 @@ and is refused for `CREATE TABLE`, `CREATE TEMP TABLE`, `UPDATE`,
 through its real code path, with the guard on. The existing (Sumopod)
 copy of Pagila had the same PUBLIC grant. It stops mattering once the
 default moves.
+
+After the switch, one of the two live workspaces was still on Sumopod:
+the original operator workspace. Its stored URL held the same database
+and credentials as the old default, but written `postgresql+asyncpg://`
+where the setting said `postgresql://`. The migration compared exact
+strings, so it left that row alone. The failure was silent: queries
+still worked, just against the old database with no read-only role. It
+was caught only by asking which rows still held their own URL, then
+proved from outside after the fix: `select current_user` through the
+live plugin key now answers `pagila_ro`. The migration now compares
+parsed URLs with the driver normalized. The live row was converted by
+hand, since that migration had already run. No workspace now stores a
+URL, so the Sumopod copy can be retired.
