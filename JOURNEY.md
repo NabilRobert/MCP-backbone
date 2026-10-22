@@ -1246,3 +1246,34 @@ only be started once per process, so the new "argument refused over
 HTTP" check had to live inside the existing HTTP test's server
 lifetime. A separate test failed with `run() can only be called once
 per instance`.
+
+## 2026-10-22 (continued) — https://mcp.my.id, no port
+
+The VPS's ports 80/443 belong to the unrelated Tamara site's Caddy
+container, so getting a portless address meant adding one site block to
+that Caddy, reverse-proxying `mcp.my.id` to uvicorn on the host. The
+Tamara Caddyfile turned out to be built into its Docker image, not
+mounted. Rather than rebuild (which would also redeploy whatever is
+currently in the Tamara source tree), the block is appended to the host
+file, copied into the running container, validated from a temp path,
+and only then hot-reloaded. Tamara never restarted, and its two
+domains returned the same 200/301 before and after. Caddy got its own
+Let's Encrypt certificate for `mcp.my.id` on the first reload.
+
+The first real deploy: pages loaded through the proxy, but every MCP
+request got `421 Invalid Host header`. uvicorn's log showed the rejected
+value: `172.18.0.1:8443`. For an HTTPS upstream, Caddy sends the
+upstream's own address as the Host header by default, not the visitor's.
+The console pages don't check the host, so they hid this; only the MCP
+endpoint's DNS-rebinding check caught it. It would also have made the
+signup page tell new users to connect to `https://172.18.0.1:8443/mcp/`.
+`header_up Host {host}` fixed it. Also verified live afterwards: the
+same uvicorn log shows real visitor IPs, not the Caddy container's. So
+the `--forwarded-allow-ips` setting works, and login lockouts are per
+visitor rather than shared by everyone behind the proxy.
+
+Verified from outside after the fix: `list_tables` works through both
+`https://mcp.my.id/mcp/` and the old `:8443` address. A key sent as a
+tool argument instead of the header is refused over the real internet,
+not just in tests. The laptop's plugin now points at the new address
+and connects.
