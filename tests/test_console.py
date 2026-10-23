@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.auth.models import Workspace
 from app.main import app
 from app.query.service import run_query
+from app.version import BUILD_VERSION
 
 pytestmark = pytest.mark.asyncio
 
@@ -241,7 +242,7 @@ async def test_healthz_reports_database_reachability(
     client = TestClient(app)
     healthy = client.get("/healthz")
     assert healthy.status_code == 200
-    assert healthy.json() == {"status": "ok", "database": "ok"}
+    assert healthy.json() == {"status": "ok", "database": "ok", "version": BUILD_VERSION}
 
     import app.main as main_module
 

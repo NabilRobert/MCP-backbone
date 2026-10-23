@@ -1545,3 +1545,14 @@ password outside the app would have had none. Provisioning now gives the
 role a 30-second default, and the red-team suite proves it by running a
 2-second sleep against a role limited to 1 second, connected directly.
 The live role gets the same setting with one `ALTER ROLE`.
+
+## 2026-10-23 (continued) — Saying which build is running
+
+The eval harness needs to record what it ran against, and the server
+couldn't say: the MCP handshake reported an empty version, and `/healthz`
+reported nothing at all. So a change in benchmark scores after a deploy
+would have been indistinguishable from a change in the model. Both now
+report the running commit (from `git describe`, with `-dirty` for a
+checkout with local edits, or `APP_BUILD_VERSION` for a build with no
+`.git`). The test compares against git directly, so it fails if the value
+ever turns into a placeholder.
