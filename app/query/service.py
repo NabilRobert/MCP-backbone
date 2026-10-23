@@ -14,7 +14,7 @@ from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
-from app.auth.rate_limit import RateLimitExceeded, check_and_increment
+from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
 from app.db import get_target_engine
 from app.query.cost_check import check_cost
@@ -164,7 +164,10 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     # request that would've been rejected anyway.
     try:
         await check_and_increment(
-            session, workspace, settings.demo_rate_limit, settings.demo_rate_limit_window_seconds
+            session,
+            workspace,
+            allowance(workspace.query_rate_limit, settings.demo_rate_limit),
+            settings.demo_rate_limit_window_seconds,
         )
     except RateLimitExceeded as exc:
         await write_audit(session, workspace, data_source, sql, "rejected", None, exc.reason)

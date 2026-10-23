@@ -15,6 +15,13 @@ class RateLimitExceeded(Exception):
         super().__init__(reason)
 
 
+def allowance(override: int | None, default: int) -> int:
+    """A workspace's own limit if the operator set one, else the
+    server-wide default. Checked against None, not truthiness: an
+    override of 0 means "no requests", not "use the default"."""
+    return default if override is None else override
+
+
 async def check_and_increment(
     session: AsyncSession,
     workspace: Workspace,

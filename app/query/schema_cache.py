@@ -13,7 +13,7 @@ from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Workspace
-from app.auth.rate_limit import RateLimitExceeded, check_and_increment
+from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
 from app.db import get_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
@@ -121,7 +121,7 @@ async def sample_rows(
         await check_and_increment(
             session,
             workspace,
-            settings.sample_rate_limit,
+            allowance(workspace.sample_rate_limit, settings.sample_rate_limit),
             settings.demo_rate_limit_window_seconds,
             bucket="sample",
         )
