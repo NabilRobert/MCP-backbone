@@ -141,7 +141,18 @@ treated as more serious than a query failure.
 limit check is scoped to the authenticated `Workspace`, resolved from the
 `ApiKey` presented. Within a workspace, each key is also limited to the
 tools it was issued for (`app/auth/scopes.py`), so a key given to a
-schema-browsing client can't read rows even if it leaks. A revoked `ApiKey` cannot authenticate at all; a
+schema-browsing client can't read rows even if it leaks. That tool
+scope is the **workspace owner's** choice, made in their own console,
+not a restriction the operator imposes: it only narrows a key, and its
+widest setting ("Full access", the default) is still bounded by
+everything the workspace has anyway (read-only role and transaction,
+validation, cost check, the workspace's rate limit, its own database,
+the audit log). So an owner picking "Full access" gains nothing they
+didn't already have. It protects the owner from their own leaked key; it
+can't confine a workspace. Confining a workspace (say, schema-only
+public demos) would need an operator-set ceiling the console can't
+exceed, the same pattern as the operator-only rate-limit overrides; no
+such ceiling exists today. A revoked `ApiKey` cannot authenticate at all; a
 separate `ConsoleCredential` (not covered by this document in depth)
 governs dashboard access independently, so key rotation doesn't lock an
 operator out of their own audit history.
