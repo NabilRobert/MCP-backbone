@@ -24,8 +24,21 @@ import secrets
 
 import asyncpg
 
+# The role's own statement_timeout, for any connection made with it. The
+# app sets its own, shorter timeouts per query (SET LOCAL, see
+# app/query/service.py), which override this, so it never cuts into normal
+# use; it's the backstop for a connection that doesn't go through the app
+# (someone holding the password, psql). Generous on purpose.
+DEFAULT_STATEMENT_TIMEOUT_SECONDS = 30
 
-async def provision(admin_dsn: str, role_name: str, database: str, schema: str) -> str:
+
+async def provision(
+    admin_dsn: str,
+    role_name: str,
+    database: str,
+    schema: str,
+    statement_timeout_seconds: int = DEFAULT_STATEMENT_TIMEOUT_SECONDS,
+) -> str:
     """Connects to the target database as a superuser/admin (admin_dsn)
     and creates a brand-new, deliberately limited database login
     (role_name) that this server's AI-facing queries will actually use.
@@ -38,6 +51,13 @@ async def provision(admin_dsn: str, role_name: str, database: str, schema: str) 
         await conn.execute(f'drop role if exists "{role_name}"')
         # Create the login itself, with a freshly generated password.
         await conn.execute(f"create role \"{role_name}\" login password '{password}'")
+        # Give every connection made with this role a time limit, so even
+        # a query that bypasses the app can't run forever. int() keeps
+        # anything but a number out of the SQL.
+        await conn.execute(
+            f"alter role \"{role_name}\" set statement_timeout = "
+            f"'{int(statement_timeout_seconds)}s'"
+        )
         # Allow it to connect to the database at all...
         await conn.execute(f'grant connect on database "{database}" to "{role_name}"')
         # ...and to "see into" this particular schema (a schema is a
@@ -101,9 +121,23 @@ def main() -> None:
     parser.add_argument("--role-name", required=True)
     parser.add_argument("--database", required=True)
     parser.add_argument("--schema", default="public")
+    parser.add_argument(
+        "--statement-timeout-seconds",
+        type=int,
+        default=DEFAULT_STATEMENT_TIMEOUT_SECONDS,
+        help="Time limit for any statement run with this role, inside or outside the app.",
+    )
     args = parser.parse_args()
 
-    password = asyncio.run(provision(args.admin_dsn, args.role_name, args.database, args.schema))
+    password = asyncio.run(
+        provision(
+            args.admin_dsn,
+            args.role_name,
+            args.database,
+            args.schema,
+            args.statement_timeout_seconds,
+        )
+    )
     print(f"Role '{args.role_name}' created on database '{args.database}'.")
     print(f"Password (shown once, store it now): {password}")
     print(
