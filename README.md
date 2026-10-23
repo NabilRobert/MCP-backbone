@@ -80,7 +80,8 @@ question fix that came out of the first run.
 4. **Ask.** For example, "which film category has the most films?". Every
    query shows up on your console's dashboard.
 
-Per workspace, per hour: 5 queries and 30 row samples; listing and
+Per workspace, per hour: 5 queries and 30 row samples by default (the
+operator can set a different allowance for one workspace); listing and
 describing tables is free. Demo signups are capped per network and per day.
 
 ## Run it yourself
@@ -123,7 +124,7 @@ app/
   mcp/        the MCP tools: a thin adapter, no business logic
   benchmark/  text-to-SQL eval cases and grading
 migrations/   Alembic migrations for the bookkeeping database
-tests/        130 tests against real Postgres, incl. the red-team suite
+tests/        135 tests against real Postgres, incl. the red-team suite
 static-src/   the console's TypeScript (compiled into app/console/static)
 plugin/       the Claude Code plugin (MCP registration + query skill)
 deploy/       systemd unit, Caddy block, firewall, backups, runbook

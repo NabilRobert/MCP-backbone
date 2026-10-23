@@ -89,7 +89,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
 - **`app/auth/rate_limit.py`** — the logic that actually enforces the
   "only N requests per hour" rule using `RateLimitCounter`, with a
   separate counter per bucket (`query` for run_query, `sample` for
-  sample_rows).
+  sample_rows). N is the server default unless the workspace has its own
+  allowance (`Workspace.query_rate_limit` / `sample_rate_limit`, set only
+  by the operator through `scripts/seed_workspace.py`).
 - **`app/auth/signup.py`** — self-serve signup, in two tiers. Without
   an invite code: a demo account on the server's default database,
   capped per client IP and per day. With one: the user may also connect

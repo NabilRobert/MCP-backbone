@@ -111,7 +111,12 @@ cost estimates can be wrong (stale statistics, complex query shapes).
 **A timed-out query is never retried** — retrying something that was slow
 or expensive just repeats the cost. This is verified behavior, not an
 assumption: a deliberately slow query was confirmed to be killed at the
-configured timeout and classified `timed_out`, not retried.
+configured timeout and classified `timed_out`, not retried. Both of those
+timeouts are set by the app per query, so a connection made *outside* the
+app with the read-only role's password would have none; the role
+therefore carries its own `statement_timeout` (30 s by default, set by
+`scripts/provision_readonly_role.py`) as a third backstop. The red-team
+suite checks it on a real provisioned role, connecting directly.
 
 ### T4: a transient infrastructure failure (dropped connection) looks like a real error
 
@@ -136,7 +141,18 @@ treated as more serious than a query failure.
 limit check is scoped to the authenticated `Workspace`, resolved from the
 `ApiKey` presented. Within a workspace, each key is also limited to the
 tools it was issued for (`app/auth/scopes.py`), so a key given to a
-schema-browsing client can't read rows even if it leaks. A revoked `ApiKey` cannot authenticate at all; a
+schema-browsing client can't read rows even if it leaks. That tool
+scope is the **workspace owner's** choice, made in their own console,
+not a restriction the operator imposes: it only narrows a key, and its
+widest setting ("Full access", the default) is still bounded by
+everything the workspace has anyway (read-only role and transaction,
+validation, cost check, the workspace's rate limit, its own database,
+the audit log). So an owner picking "Full access" gains nothing they
+didn't already have. It protects the owner from their own leaked key; it
+can't confine a workspace. Confining a workspace (say, schema-only
+public demos) would need an operator-set ceiling the console can't
+exceed, the same pattern as the operator-only rate-limit overrides; no
+such ceiling exists today. A revoked `ApiKey` cannot authenticate at all; a
 separate `ConsoleCredential` (not covered by this document in depth)
 governs dashboard access independently, so key rotation doesn't lock an
 operator out of their own audit history.
@@ -287,7 +303,9 @@ reads, not in the user's prompt).
   boundary condition rather than assuming it away.
 - **Denial of service via sheer request volume** rather than per-query
   cost — covered only by the placeholder rate limit (Phase 2), not a real
-  defense at production scale.
+  defense at production scale. A workspace the operator gives a larger
+  allowance (e.g. for benchmark runs) is bounded only by that allowance,
+  so its key should be held as carefully as the operator's own.
 - **The console's own web-application attack surface** (CSRF, XSS,
   session handling) — standard mitigations are planned (Phase 4) but not
   the focus of this document.

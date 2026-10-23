@@ -33,6 +33,11 @@ bookkeeping database is reachable, and 503 otherwise.
 
 **Invite someone:** `.venv/bin/python -m scripts.create_invite --note "name"`
 
+**A workspace with its own rate limits** (e.g. for benchmark runs):
+`.venv/bin/python -m scripts.seed_workspace --name eval --console-username eval --query-rate-limit 2000 --sample-rate-limit 2000`.
+Without the flags a workspace keeps the server defaults. To change one later:
+`UPDATE workspaces SET query_rate_limit = <n> WHERE name = '<name>';` (NULL = back to the default).
+
 **Revoke access:** a workspace's own console (Keys page: revoke the key, or
 log out everywhere), or `scripts/revoke_key.py`.
 

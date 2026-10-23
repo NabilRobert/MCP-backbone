@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, ForeignKey, String
+from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.auth.scopes import ALL_TOOLS
@@ -27,6 +27,19 @@ class Workspace(Base):
     # "invite", or "demo" (self-serve, no invite). The daily demo
     # signup cap counts "demo" rows.
     created_via: Mapped[str] = mapped_column(default="operator", server_default="operator")
+    # Per-hour allowances for run_query and sample_rows. NULL (every
+    # workspace, unless the operator sets one) means the server-wide
+    # default (APP_DEMO_RATE_LIMIT / APP_SAMPLE_RATE_LIMIT). Set only by
+    # the operator (scripts/seed_workspace.py), never from the console:
+    # a self-serve signup that could raise its own limit wouldn't be
+    # limited at all.
+    query_rate_limit: Mapped[int | None]
+    sample_rate_limit: Mapped[int | None]
+
+    __table_args__ = (
+        CheckConstraint("query_rate_limit >= 0", name="ck_workspaces_query_rate_limit"),
+        CheckConstraint("sample_rate_limit >= 0", name="ck_workspaces_sample_rate_limit"),
+    )
 
 
 class ApiKey(Base):

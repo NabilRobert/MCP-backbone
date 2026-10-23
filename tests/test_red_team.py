@@ -14,6 +14,7 @@ Two kinds of tests appear here:
 """
 
 import datetime
+import secrets
 
 import pytest
 from sqlalchemy import text
@@ -217,6 +218,60 @@ async def test_expensive_cross_join_rejected_by_cost_check(
     )
     assert result["status"] == "rejected"
     assert "cost" in (result["error"] or "").lower()
+
+
+async def test_read_only_role_has_its_own_statement_timeout(
+    db_session: AsyncSession, readonly_role_workspace: tuple[Workspace, str]
+) -> None:
+    """The app sets a timeout on every query it runs, but a connection
+    made with the role's password outside the app (psql, a leaked URL)
+    gets none of that. The role itself must carry one: checked here on
+    the real provisioned role, connecting directly, with no app code in
+    between."""
+    from scripts.provision_readonly_role import DEFAULT_STATEMENT_TIMEOUT_SECONDS
+
+    workspace, _ = readonly_role_workspace
+    data_source = await get_data_source(db_session, workspace)
+
+    engine = create_async_engine(data_source.connection_url)
+    try:
+        async with engine.connect() as conn:
+            timeout = (await conn.execute(text("show statement_timeout"))).scalar_one()
+    finally:
+        await engine.dispose()
+
+    assert timeout == f"{DEFAULT_STATEMENT_TIMEOUT_SECONDS}s"
+
+
+async def test_read_only_role_timeout_kills_a_slow_query_outside_the_app(
+    db_session: AsyncSession,
+) -> None:
+    """And that the role's timeout actually stops a statement, rather than
+    just being stored: a role provisioned with a 1-second limit runs a
+    2-second sleep directly and gets cancelled by Postgres."""
+    from sqlalchemy.engine.url import make_url
+
+    from app.db import engine as admin_engine
+    from scripts.provision_readonly_role import drop_role, provision
+
+    role_name = f"redteam_{secrets.token_hex(4)}"
+    admin_url = make_url(admin_engine.url.render_as_string(hide_password=False)).set(
+        drivername="postgresql"
+    )
+    admin_dsn = admin_url.render_as_string(hide_password=False)
+    password = await provision(
+        admin_dsn, role_name, admin_url.database or "postgres", "public", 1
+    )
+    role_url = admin_url.set(username=role_name, password=password, drivername="postgresql+asyncpg")
+
+    engine = create_async_engine(role_url)
+    try:
+        async with engine.connect() as conn:
+            with pytest.raises(Exception, match="statement timeout"):
+                await conn.execute(text("select pg_sleep(2)"))
+    finally:
+        await engine.dispose()
+        await drop_role(admin_dsn, role_name)
 
 
 # ---------------------------------------------------------------------------

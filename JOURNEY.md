@@ -1523,3 +1523,25 @@ query text (server-side, with `%` and `_` matched literally; the test
 fails without the escaping) and draws a 14-day chart as plain SVG, with
 no chart library. It was checked in a real browser against sample data,
 including a row of HTML that has to show up as text, not run.
+
+## 2026-10-23 (continued) — A rate limit the next project ran into
+
+Planning the second portfolio project, an evaluation harness that runs
+this server's benchmark against its live endpoint, turned up a clash:
+every workspace gets 5 `run_query` calls an hour, and a full run with
+repeats needs a few hundred. Worse, a rate-limited query comes back as an
+ordinary rejection, so the harness would have scored it as the agent
+getting the answer wrong. Raising the limit for everyone would weaken the
+public demo, so a workspace can now have its own allowance instead. It is
+empty by default (meaning the server default), so no existing workspace
+changed, and only the operator can set it, never the console: a
+self-serve signup that could raise its own limit wouldn't be limited at
+all.
+
+The same check of the VPS found a smaller gap. The read-only demo role
+had no timeout of its own; queries were only time-limited because the
+app sets a timeout on each one. Anyone connecting with the role's
+password outside the app would have had none. Provisioning now gives the
+role a 30-second default, and the red-team suite proves it by running a
+2-second sleep against a role limited to 1 second, connected directly.
+The live role gets the same setting with one `ALTER ROLE`.
