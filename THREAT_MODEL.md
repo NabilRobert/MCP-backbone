@@ -111,7 +111,12 @@ cost estimates can be wrong (stale statistics, complex query shapes).
 **A timed-out query is never retried** — retrying something that was slow
 or expensive just repeats the cost. This is verified behavior, not an
 assumption: a deliberately slow query was confirmed to be killed at the
-configured timeout and classified `timed_out`, not retried.
+configured timeout and classified `timed_out`, not retried. Both of those
+timeouts are set by the app per query, so a connection made *outside* the
+app with the read-only role's password would have none; the role
+therefore carries its own `statement_timeout` (30 s by default, set by
+`scripts/provision_readonly_role.py`) as a third backstop. The red-team
+suite checks it on a real provisioned role, connecting directly.
 
 ### T4: a transient infrastructure failure (dropped connection) looks like a real error
 
@@ -287,7 +292,9 @@ reads, not in the user's prompt).
   boundary condition rather than assuming it away.
 - **Denial of service via sheer request volume** rather than per-query
   cost — covered only by the placeholder rate limit (Phase 2), not a real
-  defense at production scale.
+  defense at production scale. A workspace the operator gives a larger
+  allowance (e.g. for benchmark runs) is bounded only by that allowance,
+  so its key should be held as carefully as the operator's own.
 - **The console's own web-application attack surface** (CSRF, XSS,
   session handling) — standard mitigations are planned (Phase 4) but not
   the focus of this document.
