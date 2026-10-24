@@ -25,6 +25,7 @@ from app.console.routes import templates
 from app.crypto import check_encryption_key
 from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
+from app.version import BUILD_VERSION
 
 
 # The MCP SDK's DNS-rebinding protection only accepts localhost Host
@@ -168,10 +169,14 @@ async def healthz() -> dict[str, str] | JSONResponse:
     """For uptime monitors: 200 only if the server can actually reach its
     bookkeeping database (every tool call needs it), 503 otherwise. A
     check that only proves the process is up would stay green through a
-    database outage."""
+    database outage. Also reports which build is running (app/version.py),
+    so a deploy can be confirmed from outside."""
     try:
         async with asyncio.timeout(3), SessionLocal() as session:
             await session.execute(text("SELECT 1"))
     except Exception:  # noqa: BLE001 -- any failure to reach the database is "unhealthy"
-        return JSONResponse({"status": "unhealthy", "database": "unreachable"}, status_code=503)
-    return {"status": "ok", "database": "ok"}
+        return JSONResponse(
+            {"status": "unhealthy", "database": "unreachable", "version": BUILD_VERSION},
+            status_code=503,
+        )
+    return {"status": "ok", "database": "ok", "version": BUILD_VERSION}

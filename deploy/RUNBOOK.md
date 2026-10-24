@@ -29,7 +29,9 @@ A restart logs a `CancelledError ... graceful shutdown` traceback from the
 *old* process: open MCP streams are cut after 5 seconds. That's expected.
 
 **Health:** `https://mcp.my.id/healthz` returns 200 only when the
-bookkeeping database is reachable, and 503 otherwise.
+bookkeeping database is reachable, and 503 otherwise. Its `version` field
+is the running commit (`-dirty` if the checkout has local edits), so after
+a deploy it should match `git rev-parse --short=12 HEAD`.
 
 **Invite someone:** `.venv/bin/python -m scripts.create_invite --note "name"`
 

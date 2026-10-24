@@ -17,8 +17,9 @@ from app.db import SessionLocal
 from app.query import schema_cache
 from app.query import service as query_service
 from app.query.service import QueryExecutionError
+from app.version import BUILD_VERSION
 
-mcp = MCPServer("database-mcp")
+mcp = MCPServer("database-mcp", version=BUILD_VERSION)
 
 
 def _resolve_api_key(ctx: Context, api_key: str | None) -> str:
