@@ -125,15 +125,17 @@ def _make_api_key_injector(api_key: str) -> Any:
     correctly copy that key around. So instead of putting the key in the
     model's instructions and hoping it pastes it into every tool call
     correctly, this function silently stamps the real key onto every
-    tool call before it leaves this script, overriding anything the
-    model may have guessed. Tested and confirmed necessary: a test run
-    without this showed every tool call failing with an auth error,
-    because the model (reasonably) didn't know the key at all."""
+    tool call before it leaves this script. Tested and confirmed
+    necessary: a test run without this showed every tool call failing
+    with an auth error, because the model (reasonably) didn't know the
+    key at all."""
 
     async def inject(
         _ctx: RunContext[Any], call_tool: CallToolFunc, name: str, args: dict[str, Any]
     ) -> Any:
-        return await call_tool(name, {**args, "api_key": api_key})
+        # In the request's _meta, not the arguments: the tools have no
+        # api_key argument, and _meta never reaches the model.
+        return await call_tool(name, args, metadata={"api_key": api_key})
 
     return inject
 
