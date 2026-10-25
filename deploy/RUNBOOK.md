@@ -20,7 +20,7 @@ file referenced lives in `deploy/` unless stated otherwise.
 
 **Deploy a change**
 ```bash
-cd ~/MCP-backbone && git pull && .venv/bin/pip install -q -e . \
+cd ~/MCP-backbone && git pull && uv pip install -q --python .venv/bin/python -e . \
   && .venv/bin/alembic upgrade head && sudo systemctl restart mcp-backbone \
   && systemctl is-active mcp-backbone && curl -s https://mcp.my.id/healthz
 ```
@@ -70,12 +70,13 @@ with, or the stored connection URLs can't be decrypted.
 
 ## Rebuild from nothing
 
-1. **Base:** Ubuntu with Docker, Postgres 16, Python 3.12, `age`, `rclone`,
+1. **Base:** Ubuntu with Docker, Postgres 16, Python 3.12, `uv`, `age`, `rclone`,
    `certbot` + `python3-certbot-dns-cloudflare`.
 2. **Bookkeeping DB:** create a login and a database owned by it (loopback
    only, password auth).
-3. **App:** clone to `~/MCP-backbone`, `python3 -m venv .venv`,
-   `.venv/bin/pip install -e .`, copy `.env.example` → `.env` (mode 600)
+3. **App:** clone to `~/MCP-backbone`, `uv venv .venv`,
+   `uv pip install --python .venv/bin/python -e .` (a uv venv has no
+   `pip`), copy `.env.example` → `.env` (mode 600)
    and fill it in. Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
    off-server copy if restoring data. Then `.venv/bin/alembic upgrade head`.
 4. **TLS for 8443:** `certbot certonly --dns-cloudflare
