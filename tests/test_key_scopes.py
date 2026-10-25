@@ -65,12 +65,12 @@ async def test_each_preset_allows_exactly_its_tools(
     calls = {
         "list_tables": {},
         "describe_table": {"table_name": "demo_items"},
-        "sample_rows": {"table_name": "demo_items"},
+        "sample_rows": {"table_name": "demo_items", "limit": 10},
         "run_query": {"sql": "select count(*) from demo_items"},
     }
     async with _mcp_session() as session:
         for tool, args in calls.items():
-            result = await session.call_tool(tool, {"api_key": key, **args})
+            result = await session.call_tool(tool, args, meta={"api_key": key})
             if tool in allowed:
                 assert result.is_error is False, (tool, result.content)
             else:
@@ -86,8 +86,10 @@ async def test_refused_data_reads_are_still_audited(
     workspace, _ = seeded_workspace
     key = await rotate_api_key(db_session, workspace, PRESETS["schema"][1])
     async with _mcp_session() as session:
-        await session.call_tool("run_query", {"api_key": key, "sql": "select 1"})
-        await session.call_tool("sample_rows", {"api_key": key, "table_name": "demo_items"})
+        await session.call_tool("run_query", {"sql": "select 1"}, meta={"api_key": key})
+        await session.call_tool(
+            "sample_rows", {"table_name": "demo_items", "limit": 10}, meta={"api_key": key}
+        )
 
     rows = (
         await db_session.execute(

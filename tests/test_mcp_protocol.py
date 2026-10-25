@@ -38,20 +38,26 @@ async def test_tool_calls_through_the_real_protocol(
             async with ClientSession(client_read, client_write) as session:
                 await session.initialize()
 
-                good = await session.call_tool("list_tables", {"api_key": api_key})
+                good = await session.call_tool("list_tables", {}, meta={"api_key": api_key})
                 assert good.is_error is False
 
                 bad_table = await session.call_tool(
-                    "describe_table", {"api_key": api_key, "table_name": "does_not_exist"}
+                    "describe_table", {"table_name": "does_not_exist"}, meta={"api_key": api_key}
                 )
                 assert bad_table.is_error is True
                 assert "does_not_exist" in str(bad_table.content)
 
                 bad_key = await session.call_tool(
-                    "list_tables", {"api_key": "jarvis_totally_bogus"}
+                    "list_tables", {}, meta={"api_key": "jarvis_totally_bogus"}
                 )
                 assert bad_key.is_error is True
                 assert "invalid or revoked" in str(bad_key.content)
+
+                # The old way, a key as a tool argument, is ignored now:
+                # the argument no longer exists, and extras are dropped.
+                via_argument = await session.call_tool("list_tables", {"api_key": api_key})
+                assert via_argument.is_error is True
+                assert "missing API key" in str(via_argument.content)
         finally:
             server_task.cancel()
 
@@ -106,9 +112,10 @@ async def test_tool_calls_over_real_http_transport_with_header_auth(
             assert bad_table.is_error is True
             assert "does_not_exist" in str(bad_table.content)
 
-        # Over HTTP the key must come in the header: a key passed as a
-        # tool argument travels through the AI model's own context (and
-        # its transcripts), so it's refused even when it's valid. Same
+        # Over HTTP the key must come in the header, and nowhere else:
+        # not as a tool argument (which travels through the AI model's
+        # own context and transcripts), and not in _meta (the local
+        # transports' route), even when it's valid. Same
         # server lifetime as above -- the SDK's session manager can only
         # be started once per process.
         async with (
@@ -123,4 +130,7 @@ async def test_tool_calls_over_real_http_transport_with_header_auth(
             via_argument = await session.call_tool("list_tables", {"api_key": api_key})
             assert via_argument.is_error is True
             assert "Authorization" in str(via_argument.content)
+            via_meta = await session.call_tool("list_tables", {}, meta={"api_key": api_key})
+            assert via_meta.is_error is True
+            assert "Authorization" in str(via_meta.content)
 
