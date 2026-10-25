@@ -124,7 +124,7 @@ app/
   mcp/        the MCP tools: a thin adapter, no business logic
   benchmark/  text-to-SQL eval cases and grading
 migrations/   Alembic migrations for the bookkeeping database
-tests/        138 tests against real Postgres, incl. the red-team suite
+tests/        141 tests against real Postgres, incl. the red-team suite
 static-src/   the console's TypeScript (compiled into app/console/static)
 plugin/       the Claude Code plugin (MCP registration + query skill)
 deploy/       systemd unit, Caddy block, firewall, backups, runbook

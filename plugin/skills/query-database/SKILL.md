@@ -15,11 +15,11 @@ workspace owner.
 |---|---|---|
 | `list_tables()` | See what tables exist | No |
 | `describe_table(table_name)` | Column names and types for one table | No |
-| `sample_rows(table_name, limit)` | A few real rows (`limit` defaults to 10, max 100) to see what values look like | Yes, larger allowance (30/hour by default) |
+| `sample_rows(table_name, limit)` | A few real rows (`limit` is required, max 100; 10 is usually enough) to see what values look like | Yes, larger allowance (30/hour by default) |
 | `run_query(sql)` | Run one read-only SQL statement and get the results | **Yes, tight** (5/hour by default) |
 
-Every tool also has an optional `api_key` argument. Leave it out: the plugin
-already sends the key as a header, and the server ignores the argument over HTTP.
+There is no key argument: the plugin sends your key as a header, so the model
+never sees it.
 
 ## Workflow
 

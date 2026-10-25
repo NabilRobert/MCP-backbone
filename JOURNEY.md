@@ -1556,3 +1556,31 @@ report the running commit (from `git describe`, with `-dirty` for a
 checkout with local edits, or `APP_BUILD_VERSION` for a build with no
 `.git`). The test compares against git directly, so it fails if the value
 ever turns into a placeholder.
+
+## 2026-10-25 — Tool schemas that strict-mode clients accept
+
+The eval harness's first trial failed with a 400 before the model ran.
+Inspect AI sends every tool in OpenAI's strict mode, and strict mode
+requires every argument to be required, with no defaults and no extra
+properties. Every tool here had an optional `api_key` argument, and
+`sample_rows` had a defaulted `limit`. The harness worked around it by
+turning strict mode off, but any strict-mode client would hit the same
+wall.
+
+- **The `api_key` argument is gone.** Over HTTP the key was already
+  header-only. Local transports (the in-process benchmark, tests) now send
+  it in the tool call's `_meta`, which, like the header, never reaches the
+  model. Over HTTP, `_meta` is refused too, so the header stays the only
+  way in. A client still sending the old argument gets "missing API key",
+  not a schema error, since extra arguments are dropped.
+- **`sample_rows.limit` is required** (still clamped to 1–100). A
+  default is what strict mode can't express.
+- **Every published schema says `additionalProperties: false`**, through
+  a small `list_tools` override, so clients that don't add it themselves
+  still get a valid schema.
+
+A new test checks every tool's schema against those rules. It failed on
+the old code, as it should. The benchmark's key injector now writes to
+`_meta`. A test drives it through pydantic-ai's TestModel, with no AI
+model, and fails if the injector goes back to the argument. 141 tests,
+up from 138.
