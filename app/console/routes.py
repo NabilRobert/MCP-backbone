@@ -27,11 +27,16 @@ from app.console.auth import (
     revoke_all_sessions,
     verify_console_login,
 )
+from app.console.csrf import csrf_token, verify_csrf
 from app.db import get_session
 from app.query.models import QueryExecution
 
-router = APIRouter(prefix="/console")
+# verify_csrf runs on every route here and checks every POST, so a new
+# form can't forget the check.
+router = APIRouter(prefix="/console", dependencies=[Depends(verify_csrf)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Templates call csrf_token(request) for each form's hidden field.
+templates.env.globals["csrf_token"] = csrf_token  # pyright: ignore[reportArgumentType] -- Jinja's globals type is too narrow
 
 # Every status an audit row can have (app/query/service.py), in display order.
 AUDIT_STATUSES = ("succeeded", "rejected", "errored", "timed_out")

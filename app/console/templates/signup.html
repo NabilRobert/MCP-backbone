@@ -20,6 +20,7 @@
   <p>Get an API key and ask Claude questions about a sample database
     (Pagila, a DVD-rental store). Every query is checked, read-only and logged.</p>
   <form method="post" action="/console/signup">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
     <label>
       Username
       <input type="text" name="username" required autofocus value="{{ username or '' }}"

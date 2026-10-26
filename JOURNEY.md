@@ -1606,3 +1606,28 @@ The new tests use a real stored scrypt hash, not one rebuilt by the test.
 Each was checked by breaking the code it covers (no upgrade on login,
 scrypt never verifying, parameters ignored, errors not caught, new hashes
 still scrypt) and seeing it fail. 146 tests, up from 141.
+
+## 2026-10-27 (continued) — A CSRF token behind SameSite
+
+The console's only CSRF defence was its session cookie's
+`SameSite=Strict`. That's usually enough, but it depends on every browser
+honouring it, and it treats a sibling subdomain as the same site. Every
+console form now also carries a per-session token, stored in the signed
+session cookie and checked on every POST. It's a dependency on the
+console router, not on each route, so a new form can't forget it. The
+token changes at login, so one learned before login is useless after.
+
+Written by hand, about forty lines, though the previous change replaced
+hand-written code with a library: `starlette-csrf` reads the token only
+from a header, which plain HTML forms can't send, and
+`fastapi-csrf-protect` adds a second signed cookie next to the session
+that's already there.
+
+Existing tests now submit forms the way a browser does: they load a page
+and send back its token. One mutation check caught a weak test. After
+login the session had no token until a page was rendered, so a wrong
+token was refused only because none was expected. The test now loads the
+dashboard after login, as a browser following the redirect would.
+Disabling the check, taking it off the router, skipping the rotation,
+dropping one form's field, or accepting any token each fail a test.
+152 tests, up from 146.

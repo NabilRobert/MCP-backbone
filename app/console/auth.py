@@ -11,6 +11,7 @@ from starlette.requests import Request
 
 from app.auth.models import ConsoleCredential, Workspace
 from app.auth.security import hash_password, needs_rehash, verify_password
+from app.console.csrf import rotate_csrf_token
 
 # A real-looking but fake stored hash, used only so that checking a
 # username that doesn't exist takes the same amount of time as checking
@@ -61,6 +62,7 @@ async def log_in(request: Request, session: AsyncSession, workspace: Workspace) 
     signed cookie (Starlette's SessionMiddleware), stamped with the
     login's current session_version so it can be revoked later."""
     credential = await _credential_for(session, workspace.id)
+    rotate_csrf_token(request)
     request.session["workspace_id"] = str(workspace.id)
     request.session["session_version"] = credential.session_version if credential else 0
 

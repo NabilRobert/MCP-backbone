@@ -3,13 +3,13 @@ still accepted and upgraded at the next successful login."""
 
 import pytest
 from argon2 import PasswordHasher
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ConsoleCredential, Workspace
 from app.auth.security import hash_password, needs_rehash, verify_password
 from app.main import app
+from tests.console_client import ConsoleClient
 
 # Made by the scrypt hash_password this project used before Argon2, for
 # the password below. A real stored value, not one rebuilt by the test,
@@ -65,7 +65,7 @@ async def test_login_upgrades_legacy_hash(
     ).scalar_one()
     credential.password_hash = LEGACY_HASH
     await db_session.commit()
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     wrong = client.post("/console/login", data={"username": "admin", "password": "wrong"})
     assert wrong.status_code == 200

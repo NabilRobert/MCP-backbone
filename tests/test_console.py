@@ -5,7 +5,6 @@ the audit JSON API the dashboard polls."""
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -13,6 +12,7 @@ from app.auth.models import Workspace
 from app.main import app
 from app.query.service import run_query
 from app.version import BUILD_VERSION
+from tests.console_client import ConsoleClient
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,7 +31,7 @@ def _set_cookie_https_only(monkeypatch: pytest.MonkeyPatch, value: bool) -> None
 async def test_protected_routes_redirect_when_not_logged_in(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     for path in ("/console/", "/console/keys", "/console/api/audit"):
         response = client.get(path)
@@ -42,7 +42,7 @@ async def test_protected_routes_redirect_when_not_logged_in(
 async def test_login_rejects_wrong_password(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     response = client.post("/console/login", data={"username": "admin", "password": "wrong"})
     assert response.status_code == 200
@@ -52,7 +52,7 @@ async def test_login_rejects_wrong_password(
 async def test_login_rejects_unknown_username(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     response = client.post(
         "/console/login", data={"username": "does-not-exist", "password": "anything"}
@@ -64,7 +64,7 @@ async def test_login_rejects_unknown_username(
 async def test_full_login_session_and_logout(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     login = client.post("/console/login", data={"username": "admin", "password": "testpass"})
     assert login.status_code == 303
@@ -90,11 +90,14 @@ async def test_session_cookie_secure_flag_follows_setting(
     credentials = {"username": "admin", "password": "testpass"}
 
     _set_cookie_https_only(monkeypatch, False)
-    plain = TestClient(app, follow_redirects=False).post("/console/login", data=credentials)
+    plain = ConsoleClient(app, follow_redirects=False).post("/console/login", data=credentials)
     assert "secure" not in plain.headers["set-cookie"].lower()
 
     _set_cookie_https_only(monkeypatch, True)
-    login = TestClient(app, follow_redirects=False).post("/console/login", data=credentials)
+    # Over https://: a Secure cookie isn't sent back over http://, so the
+    # login form's CSRF token couldn't be checked there.
+    secure_client = ConsoleClient(app, base_url="https://testserver", follow_redirects=False)
+    login = secure_client.post("/console/login", data=credentials)
     assert "secure" in login.headers["set-cookie"].lower()
 
 
@@ -108,12 +111,14 @@ async def test_https_only_cookie_keeps_session_over_https_but_not_http(
     _set_cookie_https_only(monkeypatch, True)
     credentials = {"username": "admin", "password": "testpass"}
 
-    https_client = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    https_client = ConsoleClient(app, base_url="https://testserver", follow_redirects=False)
     assert https_client.post("/console/login", data=credentials).status_code == 303
     assert https_client.get("/console/").status_code == 200
 
-    http_client = TestClient(app, base_url="http://testserver", follow_redirects=False)
-    assert http_client.post("/console/login", data=credentials).status_code == 303
+    # Over http:// the session cookie never comes back, so even the login
+    # form's CSRF token can't be matched: the console can't be used at all.
+    http_client = ConsoleClient(app, base_url="http://testserver", follow_redirects=False)
+    assert http_client.post("/console/login", data=credentials).status_code == 403
     dashboard = http_client.get("/console/")
     assert dashboard.status_code == 303
     assert dashboard.headers["location"] == "/console/login"
@@ -126,7 +131,7 @@ async def test_audit_api_returns_real_rows(
     await run_query(db_session, workspace, "select * from demo_items")
     await run_query(db_session, workspace, "drop table demo_items")  # rejected
 
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
 
     response = client.get("/console/api/audit")
@@ -140,7 +145,7 @@ async def test_audit_api_returns_real_rows(
 async def test_key_rotate_then_revoke(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
 
     keys_page = client.get("/console/keys")
@@ -158,7 +163,7 @@ async def test_key_rotate_then_revoke(
 async def test_landing_page_offers_a_way_in(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     visitor = client.get("/")
     assert visitor.status_code == 200
     assert 'href="/console/signup"' in visitor.text and 'href="/console/login"' in visitor.text
@@ -178,13 +183,13 @@ async def test_landing_page_shows_each_demo_step_once_its_file_exists(
     import app.main as main_module
 
     monkeypatch.setattr(main_module, "DEMO_DIR", tmp_path)
-    empty = TestClient(app).get("/").text
+    empty = ConsoleClient(app).get("/").text
     assert empty.count("Demo coming soon") == 3
     assert "og:image" not in empty
 
     for name in ("step1.gif", "step1-still.png", "step3.png"):
         (tmp_path / name).write_bytes(b"x")
-    page = TestClient(app).get("/").text
+    page = ConsoleClient(app).get("/").text
     assert page.count("Demo coming soon") == 1  # step 2 still missing
     assert '<img src="/console/static/demo/step1.gif"' in page
     assert (
@@ -216,8 +221,8 @@ async def test_log_out_everywhere_revokes_other_sessions(
     """A signed cookie can't be recalled by itself; the session_version
     stamp lets "log out everywhere" end sessions on other browsers too."""
     credentials = {"username": "admin", "password": "testpass"}
-    laptop = TestClient(app, follow_redirects=False)
-    phone = TestClient(app, follow_redirects=False)
+    laptop = ConsoleClient(app, follow_redirects=False)
+    phone = ConsoleClient(app, follow_redirects=False)
     laptop.post("/console/login", data=credentials)
     phone.post("/console/login", data=credentials)
     assert phone.get("/console/").status_code == 200
@@ -239,7 +244,7 @@ async def test_healthz_reports_database_reachability(
 ) -> None:
     """An uptime monitor needs a red signal when the server can't do its
     job, not just when the process is down."""
-    client = TestClient(app)
+    client = ConsoleClient(app)
     healthy = client.get("/healthz")
     assert healthy.status_code == 200
     assert healthy.json() == {"status": "ok", "database": "ok", "version": BUILD_VERSION}
@@ -263,7 +268,7 @@ async def test_audit_api_filters_by_status_and_text(
     await run_query(db_session, workspace, "select label from demo_items where label = '100%'")
     await run_query(db_session, workspace, "drop table demo_items")  # rejected
 
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
 
     rejected = client.get("/console/api/audit", params={"status": "rejected"}).json()
@@ -286,7 +291,7 @@ async def test_audit_daily_counts(
     await run_query(db_session, workspace, "select * from demo_items")
     await run_query(db_session, workspace, "drop table demo_items")
 
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
     days = client.get("/console/api/audit/daily").json()
 
