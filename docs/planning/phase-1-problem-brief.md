@@ -2,7 +2,7 @@
 
 **Project:** a standalone, production-grade read-only database MCP
 server — one of three focused portfolio pieces (this project, an eval
-harness, a Beobot case study), not a piece of a larger "Jarvis" platform
+harness, a case study of a production agent system), not a piece of a larger "Jarvis" platform
 shown to reviewers. See `portfolio-plan.md`: depth and finish on a small
 number of things beats breadth on one sprawling platform.
 
