@@ -1584,3 +1584,25 @@ the old code, as it should. The benchmark's key injector now writes to
 `_meta`. A test drives it through pydantic-ai's TestModel, with no AI
 model, and fails if the injector goes back to the argument. 141 tests,
 up from 138.
+
+## 2026-10-27 — Argon2 for console passwords
+
+Console passwords were hashed with hand-rolled scrypt, stored as
+`salt$digest`. The scrypt part was sound; the format wasn't. It didn't
+record its own cost parameters, so raising them would have broken every
+existing password. They're now hashed with Argon2id through
+`argon2-cffi`, whose stored value carries its parameters, so a stronger
+setting can be adopted later and old hashes spotted.
+
+Existing scrypt hashes still verify. A successful login replaces an old
+hash, scrypt or weaker Argon2, with a current one, since that's the only
+moment the plain-text password is available. A failed login changes
+nothing. One honest gap: a scrypt check is a few milliseconds faster than
+the Argon2 dummy used for unknown usernames, so until an account logs in
+once, its existence is very slightly more visible by timing. The per-IP
+login throttle limits how many timings anyone can collect.
+
+The new tests use a real stored scrypt hash, not one rebuilt by the test.
+Each was checked by breaking the code it covers (no upgrade on login,
+scrypt never verifying, parameters ignored, errors not caught, new hashes
+still scrypt) and seeing it fail. 146 tests, up from 141.

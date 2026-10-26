@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.auth.models import ConsoleCredential, Workspace
-from app.auth.security import hash_password, verify_password
+from app.auth.security import hash_password, needs_rehash, verify_password
 
 # A real-looking but fake stored hash, used only so that checking a
 # username that doesn't exist takes the same amount of time as checking
@@ -18,6 +18,10 @@ from app.auth.security import hash_password, verify_password
 # discover which usernames exist just by measuring how long the
 # response takes (skipping the slow password hash entirely for an
 # unknown username would be a visible, fast-vs-slow difference).
+# Known gap: a login still on a legacy scrypt hash is checked a few
+# milliseconds faster than this Argon2 dummy, until its next successful
+# login upgrades it; the per-IP login throttle limits how many timings
+# anyone can collect.
 _DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
 
 
@@ -37,6 +41,11 @@ async def verify_console_login(
         return None
     if not verify_password(password, credential.password_hash):
         return None
+    if needs_rehash(credential.password_hash):
+        # The only moment the plain-text password is available, so the
+        # only moment an old hash can be upgraded to the current scheme.
+        credential.password_hash = hash_password(password)
+        await session.commit()
     return await session.get(Workspace, credential.workspace_id)
 
 
