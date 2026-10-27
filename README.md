@@ -99,6 +99,15 @@ One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 restoring and rebuilding the production server:
 [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
+**Tracing** (optional): set `OTEL_EXPORTER_OTLP_ENDPOINT` (for example
+`http://127.0.0.1:4318`) and every tool call is exported as an
+OpenTelemetry trace: the MCP SDK's span for the request, with one child
+span per stage (`authenticate`, `rate_limit`, `validate`, `cost_check`,
+`execute`, `audit`), joined to the calling agent's trace through the
+request's `_meta`. Off without the variable. No SQL text or rejection
+reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
+[app/tracing.py](app/tracing.py).
+
 **Tests** (130, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
