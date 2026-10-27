@@ -11,13 +11,16 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import Tool
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.models import Workspace
 from app.auth.scopes import DESCRIBE_TABLE, LIST_TABLES, RUN_QUERY, SAMPLE_ROWS
 from app.auth.service import AuthenticationError, ToolNotPermitted, authenticate
 from app.db import SessionLocal
 from app.query import schema_cache
 from app.query import service as query_service
 from app.query.service import QueryExecutionError
+from app.tracing import stage
 from app.version import BUILD_VERSION
 
 
@@ -63,6 +66,14 @@ def _resolve_api_key(ctx: Context) -> str:
     raise AuthenticationError("missing API key (send it as _meta.api_key on the tool call)")
 
 
+async def _authenticate(session: AsyncSession, ctx: Context, scope: str) -> Workspace:
+    """authenticate() for a tool call, timed as its own "authenticate"
+    span in the request's trace (app/tracing.py). A refusal shows up on
+    that span as the exception's class name, e.g. ToolNotPermitted."""
+    with stage("authenticate"):
+        return await authenticate(session, _resolve_api_key(ctx), scope)
+
+
 def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
     """A wrapper placed around every tool function below. Its job: turn
     our own "expected" errors (a bad API key, a table that doesn't
@@ -88,7 +99,7 @@ def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Await
 async def list_tables(ctx: Context) -> list[str]:
     """Tool: "what tables exist in my database?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx), LIST_TABLES)
+        workspace = await _authenticate(session, ctx, LIST_TABLES)
         return await query_service.list_tables(session, workspace)
 
 
@@ -97,7 +108,7 @@ async def list_tables(ctx: Context) -> list[str]:
 async def describe_table(ctx: Context, table_name: str) -> dict[str, Any]:
     """Tool: "what columns does this specific table have?\""""
     async with SessionLocal() as session:
-        workspace = await authenticate(session, _resolve_api_key(ctx), DESCRIBE_TABLE)
+        workspace = await _authenticate(session, ctx, DESCRIBE_TABLE)
         return await schema_cache.describe_table(session, workspace, table_name)
 
 
@@ -109,7 +120,7 @@ async def sample_rows(ctx: Context, table_name: str, limit: int) -> list[dict[st
     many rows, 1 to 100; 10 is usually enough."""
     async with SessionLocal() as session:
         try:
-            workspace = await authenticate(session, _resolve_api_key(ctx), SAMPLE_ROWS)
+            workspace = await _authenticate(session, ctx, SAMPLE_ROWS)
         except ToolNotPermitted as exc:
             # An attempt to read data, so it's audited even when refused.
             await query_service.record_refusal(
@@ -127,7 +138,7 @@ async def run_query(ctx: Context, sql: str) -> dict[str, Any]:
     and app/query/cost_check.py) before anything actually executes."""
     async with SessionLocal() as session:
         try:
-            workspace = await authenticate(session, _resolve_api_key(ctx), RUN_QUERY)
+            workspace = await _authenticate(session, ctx, RUN_QUERY)
         except ToolNotPermitted as exc:
             await query_service.record_refusal(session, exc.workspace, sql, str(exc))
             raise
