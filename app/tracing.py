@@ -15,6 +15,7 @@ app/config.py)."""
 
 import logging
 import os
+import threading
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 
@@ -36,8 +37,13 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("mcp-backbone")
 
 # The exporter's default timeout (10 s, plus retries) let a dead viewer
-# hold up a shutdown for 6.5 s in a test; 2 s keeps that to about 1 s.
+# hold up a shutdown for 6.5 s in a test; 2 s keeps that to about 1 s
+# per batch of spans.
 DEFAULT_EXPORT_TIMEOUT_SECONDS = 2.0
+# But a shutdown flushes every queued batch, each with its own timeout: a
+# full queue (four batches) and a dead viewer took 5.3 s in the overhead
+# measurement. So the shutdown as a whole is capped too.
+SHUTDOWN_TIMEOUT_SECONDS = 2.0
 
 
 def build_span_processor(env: Mapping[str, str] = os.environ) -> SpanProcessor | None:
@@ -85,6 +91,24 @@ def configure_tracing() -> TracerProvider | None:
     except Exception:  # see the docstring: never stop the server starting
         logger.warning("tracing not enabled: setting it up failed", exc_info=True)
         return None
+
+
+def shutdown_tracing(
+    provider: TracerProvider, timeout_seconds: float = SHUTDOWN_TIMEOUT_SECONDS
+) -> bool:
+    """Flushes what's still queued and stops the exporter, waiting at most
+    `timeout_seconds`, so a dead viewer can't hold up a restart. The
+    SDK's own shutdown has no overall limit worth the name (30 s), so it
+    runs in a daemon thread; spans still queued when time runs out are
+    lost, which is acceptable: traces are a view, the audit log is the
+    record. Returns whether the flush finished in time."""
+    flusher = threading.Thread(target=provider.shutdown, name="tracing-shutdown", daemon=True)
+    flusher.start()
+    flusher.join(timeout_seconds)
+    if flusher.is_alive():
+        logger.warning("tracing: gave up flushing spans after %.0f s", timeout_seconds)
+        return False
+    return True
 
 
 # The attributes every database span carries (OpenTelemetry's database

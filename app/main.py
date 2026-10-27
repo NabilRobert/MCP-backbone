@@ -25,7 +25,7 @@ from app.console.routes import templates
 from app.crypto import check_encryption_key
 from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
-from app.tracing import configure_tracing
+from app.tracing import configure_tracing, shutdown_tracing
 from app.version import BUILD_VERSION
 
 
@@ -70,9 +70,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     finally:
         await dispose_target_engines()
         if tracer_provider is not None:
-            # Sends what's still queued; bounded by the exporter's timeout,
-            # so a dead viewer can't hold up a restart for long.
-            tracer_provider.shutdown()
+            # Sends what's still queued, for 2 s at most, so a dead viewer
+            # can't hold up a restart.
+            shutdown_tracing(tracer_provider)
 
 
 app = FastAPI(title="Database MCP Console", lifespan=lifespan)

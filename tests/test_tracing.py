@@ -28,7 +28,7 @@ from app.auth.models import Workspace
 from app.config import settings
 from app.db import engine
 from app.mcp.server import mcp
-from app.tracing import build_span_processor
+from app.tracing import build_span_processor, shutdown_tracing
 
 pytestmark = pytest.mark.asyncio
 
@@ -317,6 +317,24 @@ async def test_spans_go_to_the_configured_endpoint() -> None:
     finally:
         server.shutdown()
     assert paths == ["/v1/traces", "/custom/path"]
+
+
+async def test_a_full_queue_and_a_dead_viewer_cant_hold_up_shutdown() -> None:
+    """The SDK flushes every queued batch at shutdown, each with its own
+    export timeout: four batches for a closed port took 5.3 s in the
+    overhead measurement. shutdown_tracing gives up at its cap instead."""
+    processor = build_span_processor({"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:9"})
+    assert processor is not None
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+    for _ in range(2048):  # the default queue size: four batches of 512
+        tracer.start_span("queued").end()
+
+    started = time.monotonic()
+    finished = shutdown_tracing(provider, timeout_seconds=1.0)
+    assert time.monotonic() - started < 1.5
+    assert finished is False
 
 
 async def test_tracing_is_off_unless_an_endpoint_is_set() -> None:
