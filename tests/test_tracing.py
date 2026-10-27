@@ -8,6 +8,8 @@ test_mcp_protocol.py, with the spans collected in memory."""
 
 import asyncio
 import contextlib
+import http.server
+import threading
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
@@ -20,9 +22,11 @@ from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, StatusCode
+from sqlalchemy import text
 
 from app.auth.models import Workspace
 from app.config import settings
+from app.db import engine
 from app.mcp.server import mcp
 from app.tracing import build_span_processor
 
@@ -242,6 +246,25 @@ async def test_content_capture_puts_the_query_text_in_the_spans(
     assert len(explain_errors) == 1
 
 
+async def test_a_failed_audit_write_leaks_no_query_text(
+    seeded_workspace: tuple[Workspace, str],
+) -> None:
+    """The database's error for a failed INSERT quotes its parameters,
+    the query text among them. The call fails, as it must (no unaudited
+    query), and the audit span says only which exception it was."""
+    async with engine.begin() as conn:
+        await conn.execute(text("drop table query_executions cascade"))
+    async with mcp_client(seeded_workspace[1]) as call:
+        result = await call("run_query", {"sql": f"select '{MARKER}' as m from demo_items"})
+    assert result["is_error"] is True
+
+    spans = _spans()
+    (audit,) = _named(spans, "audit")
+    assert audit.status.status_code is StatusCode.ERROR
+    assert _attr(audit, "error.type") == "ProgrammingError"
+    assert [s.name for s in spans if MARKER in _everything_recorded(s)] == []
+
+
 async def test_a_dead_trace_viewer_changes_nothing(
     seeded_workspace: tuple[Workspace, str],
 ) -> None:
@@ -260,6 +283,40 @@ async def test_a_dead_trace_viewer_changes_nothing(
         started = time.monotonic()
         processor.shutdown()
         assert time.monotonic() - started < 4
+
+
+async def test_spans_go_to_the_configured_endpoint() -> None:
+    """The endpoint is read from the env given, as the SDK reads it: the
+    traces-only variable as is, the general one with /v1/traces added."""
+    paths: list[str] = []
+
+    class Collector(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # the stdlib handler's name for a POST
+            self.rfile.read(int(self.headers["Content-Length"]))
+            paths.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Collector)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        for env in (
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": base},
+            {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": f"{base}/custom/path"},
+        ):
+            processor = build_span_processor(env)
+            assert processor is not None
+            provider = TracerProvider()
+            provider.add_span_processor(processor)
+            provider.get_tracer("test").start_span("one").end()
+            provider.shutdown()
+    finally:
+        server.shutdown()
+    assert paths == ["/v1/traces", "/custom/path"]
 
 
 async def test_tracing_is_off_unless_an_endpoint_is_set() -> None:
