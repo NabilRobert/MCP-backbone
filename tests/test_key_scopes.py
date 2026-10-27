@@ -6,7 +6,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import pytest
-from fastapi.testclient import TestClient
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 from sqlalchemy import select
@@ -18,6 +17,7 @@ from app.auth.service import rotate_api_key
 from app.main import app
 from app.mcp.server import mcp
 from app.query.models import QueryExecution
+from tests.console_client import ConsoleClient
 
 pytestmark = pytest.mark.asyncio
 
@@ -105,7 +105,7 @@ async def test_refused_data_reads_are_still_audited(
 async def test_console_issues_a_key_with_the_chosen_access(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     client.post("/console/login", data={"username": "admin", "password": "testpass"})
 
     page = client.post("/console/keys/rotate", data={"access": "explore"})

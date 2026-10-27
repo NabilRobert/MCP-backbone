@@ -72,8 +72,9 @@ app = FastAPI(title="Database MCP Console", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).parent / "console" / "static"
 
-# The console's signed session cookie. same_site="strict" is the console's
-# CSRF defense (every form is a same-origin POST). https_only is on for the
+# The console's signed session cookie. same_site="strict" is the first
+# CSRF defense (every form is a same-origin POST); the per-session form
+# token in app/console/csrf.py is the second. https_only is on for the
 # deployment, off for local plain-HTTP development.
 app.add_middleware(
     SessionMiddleware,

@@ -17,6 +17,7 @@ dependencies = [
     "mcp>=1.0",
     "itsdangerous>=2.2",
     "cryptography>=43",
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]

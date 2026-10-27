@@ -7,7 +7,6 @@ import datetime
 from typing import Any, cast
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +20,7 @@ from app.query import schema_cache
 from app.query.models import DataSourceConnection, QueryExecution
 from app.query.network_guard import UnsafeTargetError, ensure_public_target
 from app.query.service import QueryExecutionError, list_tables, run_query
+from tests.console_client import ConsoleClient
 
 pytestmark = pytest.mark.asyncio
 
@@ -32,7 +32,7 @@ async def _clear_throttle(session: AsyncSession) -> None:
     await session.commit()
 
 
-def _signup(client: TestClient, invite: str, username: str = "newuser", **extra: str):
+def _signup(client: ConsoleClient, invite: str, username: str = "newuser", **extra: str):
     return client.post(
         "/console/signup",
         data={"invite_code": invite, "username": username, "password": STRONG_PASSWORD, **extra},
@@ -177,7 +177,7 @@ async def test_login_locks_out_after_repeated_failures(
     seeded_workspace: tuple[Workspace, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
     for _ in range(settings.login_max_failures):
         bad = client.post("/console/login", data={"username": "admin", "password": "wrong"})
         assert bad.status_code == 200
@@ -193,7 +193,7 @@ async def test_login_locks_out_after_repeated_failures(
 
 async def test_signup_with_default_database(db_session: AsyncSession) -> None:
     invite = await create_invite(db_session, "for-default-test")
-    client = TestClient(app, follow_redirects=False)
+    client = ConsoleClient(app, follow_redirects=False)
 
     response = _signup(client, invite)
     assert response.status_code == 200
@@ -221,7 +221,7 @@ async def test_signup_with_default_database(db_session: AsyncSession) -> None:
     assert client.get("/console/").status_code == 200
 
     # And the code can't be used twice.
-    again = _signup(TestClient(app, follow_redirects=False), invite, username="someoneelse")
+    again = _signup(ConsoleClient(app, follow_redirects=False), invite, username="someoneelse")
     assert again.status_code == 400
     assert "invalid, expired, or already used" in again.text
 
@@ -232,7 +232,7 @@ async def test_signup_with_own_database_warns_about_write_access(
     invite = await create_invite(db_session, "for-own-db-test")
     own_url = engine.url.render_as_string(hide_password=False)  # the test superuser
 
-    response = _signup(TestClient(app), invite, connection_url=own_url)
+    response = _signup(ConsoleClient(app), invite, connection_url=own_url)
     assert response.status_code == 200
     assert "superuser" in response.text
 
@@ -258,7 +258,7 @@ async def test_failed_signup_leaves_invite_unused(
     invite = await create_invite(db_session, "for-failure-test")
     data = {"invite_code": invite, "username": "newuser", "password": STRONG_PASSWORD, **form}
 
-    response = TestClient(app).post("/console/signup", data=data)
+    response = ConsoleClient(app).post("/console/signup", data=data)
     assert response.status_code == 400
     assert expected_error in response.text
     assert await _invite_used_at(db_session, "for-failure-test") is None
@@ -268,7 +268,7 @@ async def test_failed_signup_leaves_invite_unused(
 async def test_signup_unreachable_database_is_refused(db_session: AsyncSession) -> None:
     invite = await create_invite(db_session, "for-unreachable-test")
     response = _signup(
-        TestClient(app), invite, connection_url="postgresql://u:p@127.0.0.1:1/nothing"
+        ConsoleClient(app), invite, connection_url="postgresql://u:p@127.0.0.1:1/nothing"
     )
     assert response.status_code == 400
     assert "could not connect" in response.text
@@ -279,7 +279,7 @@ async def test_signup_rejects_taken_username(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
     invite = await create_invite(db_session, "for-duplicate-test")
-    response = _signup(TestClient(app), invite, username="admin")
+    response = _signup(ConsoleClient(app), invite, username="admin")
     assert response.status_code == 400
     assert "username is taken" in response.text
     assert await _invite_used_at(db_session, "for-duplicate-test") is None
@@ -290,7 +290,7 @@ async def test_signup_rejects_expired_and_unknown_invites(db_session: AsyncSessi
     await db_session.execute(text("UPDATE invite_codes SET expires_at = now() - interval '1 day'"))
     await db_session.commit()
 
-    client = TestClient(app)
+    client = ConsoleClient(app)
     for code in (expired, "inv_made_up"):
         response = _signup(client, code)
         assert response.status_code == 400
@@ -307,19 +307,19 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
     be able to dodge the lockout by sending its own X-Forwarded-For."""
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-    def behind_proxy(trusted_hosts: str) -> TestClient:
+    def behind_proxy(trusted_hosts: str) -> ConsoleClient:
         # cast: uvicorn and Starlette each declare their own ASGI app
         # types, which pyright can't match up, though both are plain ASGI.
         wrapped = ProxyHeadersMiddleware(cast(Any, app), trusted_hosts=trusted_hosts)
-        return TestClient(cast(Any, wrapped))
+        return ConsoleClient(cast(Any, wrapped))
 
     wrong = {"username": "admin", "password": "wrong"}
 
-    def fail_until_locked(client: TestClient, forwarded_for: str) -> None:
+    def fail_until_locked(client: ConsoleClient, forwarded_for: str) -> None:
         for _ in range(settings.login_max_failures):
             client.post("/console/login", data=wrong, headers={"X-Forwarded-For": forwarded_for})
 
-    # TestClient's peer address is "testclient": trusted here, like Caddy.
+    # ConsoleClient's peer address is "testclient": trusted here, like Caddy.
     via_proxy = behind_proxy("testclient")
     fail_until_locked(via_proxy, "203.0.113.1")
     locked = via_proxy.post(
@@ -346,14 +346,14 @@ async def test_lockout_uses_forwarded_ip_only_from_trusted_proxy(
 # --- Demo signup (no invite code) -------------------------------------------
 
 
-def _demo_signup(client: TestClient, username: str, **extra: str):
+def _demo_signup(client: ConsoleClient, username: str, **extra: str):
     return client.post(
         "/console/signup", data={"username": username, "password": STRONG_PASSWORD, **extra}
     )
 
 
 async def test_demo_signup_needs_no_invite(db_session: AsyncSession) -> None:
-    response = _demo_signup(TestClient(app), "demo-user")
+    response = _demo_signup(ConsoleClient(app), "demo-user")
     assert response.status_code == 200
     api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
 
@@ -365,7 +365,7 @@ async def test_demo_signup_needs_no_invite(db_session: AsyncSession) -> None:
 
 async def test_demo_signup_cannot_bring_its_own_database(db_session: AsyncSession) -> None:
     response = _demo_signup(
-        TestClient(app), "demo-user", connection_url="postgresql://u:p@8.8.8.8/db"
+        ConsoleClient(app), "demo-user", connection_url="postgresql://u:p@8.8.8.8/db"
     )
     assert response.status_code == 400
     assert "needs an invite code" in response.text
@@ -376,7 +376,7 @@ async def test_demo_signups_are_capped_per_ip(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "demo_signups_per_ip_per_day", 2)
-    client = TestClient(app)
+    client = ConsoleClient(app)
     assert _demo_signup(client, "demo-one").status_code == 200
     assert _demo_signup(client, "demo-two").status_code == 200
     third = _demo_signup(client, "demo-three")
@@ -392,10 +392,10 @@ async def test_demo_signups_are_capped_per_day_overall(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "demo_signups_per_day", 1)
-    assert _demo_signup(TestClient(app), "demo-one").status_code == 200
+    assert _demo_signup(ConsoleClient(app), "demo-one").status_code == 200
     await _clear_throttle(db_session)
 
-    full = _demo_signup(TestClient(app), "demo-two")
+    full = _demo_signup(ConsoleClient(app), "demo-two")
     assert full.status_code == 400
     assert "demo is full for today" in full.text
 
@@ -404,14 +404,14 @@ async def test_demo_signup_can_be_switched_off(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "demo_signups_enabled", False)
-    response = _demo_signup(TestClient(app), "demo-user")
+    response = _demo_signup(ConsoleClient(app), "demo-user")
     assert response.status_code == 400
     assert "needs an invite code" in response.text
 
 
 async def test_invite_signup_is_recorded_as_invite(db_session: AsyncSession) -> None:
     invite = await create_invite(db_session, "for-created-via")
-    response = _signup(TestClient(app), invite, username="invited")
+    response = _signup(ConsoleClient(app), invite, username="invited")
     api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
     assert (await authenticate(db_session, api_key)).created_via == "invite"
 
@@ -424,7 +424,7 @@ async def test_default_target_is_referenced_not_stored(db_session: AsyncSession)
     APP_TARGET_DATABASE_URL, so the operator can move every default
     workspace by changing one setting, and the default's password is
     never copied into the bookkeeping database."""
-    response = _demo_signup(TestClient(app), "demo-user")
+    response = _demo_signup(ConsoleClient(app), "demo-user")
     assert response.status_code == 200
 
     data_source = (await db_session.execute(select(DataSourceConnection))).scalar_one()
@@ -445,7 +445,7 @@ async def test_default_target_is_exempt_from_the_private_address_guard(
     )
     monkeypatch.setattr(settings, "allow_private_targets", False)
 
-    response = _demo_signup(TestClient(app), "demo-user")
+    response = _demo_signup(ConsoleClient(app), "demo-user")
     api_key = response.text.split('class="key-box">')[1].split("<")[0].strip()
     workspace = await authenticate(db_session, api_key)
 
@@ -455,7 +455,7 @@ async def test_default_target_is_exempt_from_the_private_address_guard(
 async def test_throttle_stores_a_hash_not_the_ip(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
-    TestClient(app).post("/console/login", data={"username": "admin", "password": "wrong"})
+    ConsoleClient(app).post("/console/login", data={"username": "admin", "password": "wrong"})
     keys = (await db_session.execute(select(ThrottleEvent.key))).scalars().all()
     assert len(keys) == 1
     assert "testclient" not in keys[0] and len(keys[0]) == 64  # SHA-256 hex

@@ -17,6 +17,7 @@
   <p>Created: {{ active_key.created_at }}</p>
   <form class="inline" method="post" action="/console/keys/revoke"
         onsubmit="return confirm('Revoke the current API key? Any AI client using it will stop working immediately.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
     <button type="submit">Revoke key</button>
   </form>
 {% else %}
@@ -25,6 +26,7 @@
 
 <form method="post" action="/console/keys/rotate"
       onsubmit="return confirm('Issue a new key? This revokes the current one immediately.');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
   <p>
     <label>Access for the new key:
       <select name="access">
@@ -44,6 +46,7 @@
   this console, including this one.</p>
 <form class="inline" method="post" action="/console/sessions/revoke"
       onsubmit="return confirm('Log out every browser signed in to this console?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
   <button type="submit">Log out everywhere</button>
 </form>
 {% endblock %}
