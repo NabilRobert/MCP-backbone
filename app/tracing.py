@@ -42,23 +42,25 @@ DEFAULT_EXPORT_TIMEOUT_SECONDS = 2.0
 
 def build_span_processor(env: Mapping[str, str] = os.environ) -> SpanProcessor | None:
     """The background exporter to install, or None when no endpoint is
-    configured. The exporter reads the endpoint and headers from the
-    standard OTEL_EXPORTER_OTLP_* variables itself."""
+    configured. Endpoint and timeout come from `env`, read the way the
+    SDK reads the standard variables: the traces-only endpoint as given,
+    the general one with /v1/traces added, and the timeout in seconds.
+    (Headers, if any, the exporter still reads from the environment.)"""
     if env.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
         return None
-    if not (
-        env.get("OTEL_EXPORTER_OTLP_ENDPOINT") or env.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-    ):
+    base = env.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    endpoint = env.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or (
+        f"{base.rstrip('/')}/v1/traces" if base else ""
+    )
+    if not endpoint:
         return None
-    timeout_set = env.get("OTEL_EXPORTER_OTLP_TIMEOUT") or env.get(
-        "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"
+    timeout = env.get("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT") or env.get("OTEL_EXPORTER_OTLP_TIMEOUT")
+    return BatchSpanProcessor(
+        OTLPSpanExporter(
+            endpoint=endpoint,
+            timeout=float(timeout) if timeout else DEFAULT_EXPORT_TIMEOUT_SECONDS,
+        )
     )
-    exporter = (
-        OTLPSpanExporter()
-        if timeout_set
-        else OTLPSpanExporter(timeout=DEFAULT_EXPORT_TIMEOUT_SECONDS)
-    )
-    return BatchSpanProcessor(exporter)
 
 
 def configure_tracing() -> TracerProvider | None:
