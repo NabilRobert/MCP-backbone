@@ -39,23 +39,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
 
-      - name: Create venv and install dependencies
-        run: |
-          python -m venv .venv
-          .venv/bin/pip install -e ".[dev,benchmark]"
+      # The exact versions in uv.lock, the ones the server runs, not the
+      # newest releases pyproject's ranges allow. --locked fails if uv.lock
+      # no longer matches pyproject.toml (--frozen would install the stale
+      # lock without a word).
+      - name: Install (exact versions from uv.lock)
+        run: uv sync --locked --extra dev --extra benchmark
 
       - name: Lint (ruff)
-        run: .venv/bin/ruff check .
+        run: uv run --frozen ruff check .
 
       - name: Type check (pyright)
-        run: .venv/bin/pyright app/ tests/ scripts/
+        run: uv run --frozen pyright app/ tests/ scripts/
 
       - name: Test (pytest)
-        run: .venv/bin/pytest tests/ -v
+        run: uv run --frozen pytest tests/ -v
 
   console:
     # The console's compiled JS is committed (the server has no Node), so
