@@ -25,6 +25,7 @@ from app.console.routes import templates
 from app.crypto import check_encryption_key
 from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
+from app.tracing import configure_tracing, shutdown_tracing
 from app.version import BUILD_VERSION
 
 
@@ -59,6 +60,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     # Refuse to start without a usable encryption key, rather than
     # starting fine and failing every tool call (see app/crypto.py).
     check_encryption_key()
+    # None unless OTEL_EXPORTER_OTLP_ENDPOINT is set (see app/tracing.py).
+    tracer_provider = configure_tracing()
     try:
         # Started here because Starlette never runs a mounted sub-app's own
         # lifespan; without it every /mcp request would hang.
@@ -66,6 +69,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         await dispose_target_engines()
+        if tracer_provider is not None:
+            # Sends what's still queued, for 2 s at most, so a dead viewer
+            # can't hold up a restart.
+            shutdown_tracing(tracer_provider)
 
 
 app = FastAPI(title="Database MCP Console", lifespan=lifespan)

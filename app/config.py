@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # separated hostnames (no port, no scheme) this server is actually
     # reachable at, e.g. "mcp.example.com" for a real deployment.
     mcp_allowed_hosts: str = ""
+    # Puts the SQL text and the rejection reasons into the trace spans
+    # (app/tracing.py). Off by default: a query can hold anything a user
+    # typed, and the trace viewer would be a second place it's stored.
+    otel_capture_content: bool = False
 
     @field_validator("console_session_secret", mode="after")
     @classmethod
