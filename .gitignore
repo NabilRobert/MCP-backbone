@@ -10,3 +10,6 @@ app/console/static/*.js.map
 .DS_Store
 # Raw screen recordings for the demo GIF (large; the GIF itself is committed)
 docs/demo/raw/
+# Private notes and backups: never committed
+HANDOVER*.md
+backups/
