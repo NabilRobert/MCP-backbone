@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, String
+from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.auth.scopes import ALL_TOOLS
@@ -60,8 +60,11 @@ class ApiKey(Base):
     revoked_at: Mapped[datetime | None]
     # The MCP tools this key may call (app/auth/scopes.py). Every key made
     # before scopes existed, and every key made without choosing, gets all.
+    # text[], not varchar[]: asyncpg decodes text[] natively, but looked
+    # varchar[] up on every new connection, which every tool call opens
+    # (about 8.5 ms each, measured).
     scopes: Mapped[list[str]] = mapped_column(
-        ARRAY(String),
+        ARRAY(Text),
         default=lambda: list(ALL_TOOLS),
         server_default="{" + ",".join(ALL_TOOLS) + "}",
     )

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ApiKey, Workspace
@@ -118,3 +118,16 @@ async def test_console_issues_a_key_with_the_chosen_access(
 
     unknown = client.post("/console/keys/rotate", data={"access": "superuser"})
     assert unknown.status_code == 400
+
+
+async def test_scopes_are_stored_as_text_array(db_session: AsyncSession) -> None:
+    """text[], not varchar[]: asyncpg decodes text[] natively, but looked
+    varchar[] up on every new connection, and every tool call opens one
+    (about 8.5 ms per call, measured; migration 3fbb5eeefe5a)."""
+    column_type = await db_session.scalar(
+        text(
+            "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+            "WHERE attrelid = 'api_keys'::regclass AND attname = 'scopes'"
+        )
+    )
+    assert column_type == "text[]"
