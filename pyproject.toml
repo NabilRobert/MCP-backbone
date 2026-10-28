@@ -46,6 +46,9 @@ extend-exclude = ["migrations/versions"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.pyright]
+# The folders CI type-checks, so an editor (Pylance) and a bare `pyright`
+# report exactly what CI does.
+include = ["app", "tests", "scripts"]
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
