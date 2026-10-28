@@ -88,7 +88,7 @@ def upgrade() -> None:
     sa.Column('data_source_connection_id', sa.Uuid(), nullable=False),
     sa.Column('query_text', sa.String(), nullable=False),
     sa.Column('status', sa.String(), nullable=False),
-    sa.Column('cost_estimate', sa.Double(), nullable=True),
+    sa.Column('cost_estimate', sa.Double[float](), nullable=True),
     sa.Column('rejection_reason', sa.String(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['data_source_connection_id'], ['data_source_connections.id'], ),
