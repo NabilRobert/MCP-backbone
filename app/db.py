@@ -56,7 +56,7 @@ def create_target_engine(connection_url: str, *, pooled: bool = False) -> AsyncE
       read-only role can be made. A query can't switch it off
       mid-statement; a separate SET TRANSACTION READ WRITE could, which
       needs a way past the single-SELECT validator first. See
-      THREAT_MODEL.md T1."""
+      docs/threat-model.md T1."""
     if _POSTGRES_SCHEME.match(connection_url):
         connection_url = _POSTGRES_SCHEME.sub("postgresql+asyncpg://", connection_url, count=1)
     options: dict[str, Any] = (

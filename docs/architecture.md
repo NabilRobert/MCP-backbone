@@ -25,10 +25,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    with a scary traceback. `_resolve_api_key` is the "who's asking"
    check itself: over HTTP, the key must arrive as an `Authorization:
    Bearer <key>` header (read via the tool's `ctx: Context`
-   parameter), and a key passed as the `api_key` tool argument is
-   refused, since an argument passes through the AI model's own
-   context. Local stdio/in-memory callers, which have no headers, still
-   use the argument.
+   parameter). There is no `api_key` tool argument: an argument passes
+   through the AI model's own context. Local stdio/in-memory callers,
+   which have no headers, send the key in the request's `_meta` instead.
 
 2. **`app/auth/service.py`** — "who is this?" Takes the API key the
    request came with, hashes it, looks it up, and either returns the
@@ -132,8 +131,8 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   Real production deployment (the VPS) keeps the bookkeeping database
   this file connects to (`APP_DATABASE_URL`) on a completely separate
   Postgres instance from any target database an AI client can actually
-  query — deliberately, not incidentally, see THREAT_MODEL.md and
-  JOURNEY.md for a real incident where those two databases ended up
+  query — deliberately, not incidentally, see docs/threat-model.md and
+  docs/journey.md for a real incident where those two databases ended up
   being the same one.
 - **`app/crypto.py`** — encrypts and decrypts stored connection URLs
   (Fernet), with the key from `APP_CONNECTION_ENCRYPTION_KEY`, never
@@ -146,7 +145,7 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   console's login depends on. Also mounts the MCP server itself at
   `/mcp` -- one process serves both. Combines its own lifespan with
   the MCP server's (mounting a sub-app does not run that sub-app's
-  own lifespan automatically; see JOURNEY.md).
+  own lifespan automatically; see docs/journey.md).
 - **`app/console/auth.py`** — the console's login check, against
   `ConsoleCredential` (deliberately separate from `ApiKey` -- see
   app/auth/models.py -- so revoking a compromised API key never locks
@@ -186,7 +185,7 @@ setting things up:
   demo against.
 - **`load_pagila_dataset.py`** — an alternative, richer target: loads
   Pagila, a real public Postgres sample database, instead of the
-  hand-written data above. See JOURNEY.md for why a plain substring
+  hand-written data above. See docs/journey.md for why a plain substring
   filter almost deleted the real `film` table while stripping out the
   (unused) pgvector extension this schema optionally ships with.
 - **`seed_eval_cases.py`** / **`run_benchmark.py`** — the Slice E
@@ -256,21 +255,21 @@ tests `app/query/validation.py`, `test_rate_limit_and_revocation.py`
 tests the auth pieces, and so on. `test_mcp_protocol.py` is special — it
 tests the *whole chain* together through the actual MCP protocol, not
 just one file at a time. `test_red_team.py` is the adversarial suite —
-see RED_TEAM.md for what it covers and why.
+see docs/red-team.md for what it covers and why.
 
 ## The non-code files
 
 `docs/planning/` holds `phase-1` through `phase-7`, the planning trail (problem →
-requirements → domain model → ... → work plan). `THREAT_MODEL.md` says
-what this defends against and what it doesn't. `RED_TEAM.md` is the
+requirements → domain model → ... → work plan). `docs/threat-model.md` says
+what this defends against and what it doesn't. `docs/red-team.md` is the
 published evidence for that -- the adversarial test suite's results.
-`JOURNEY.md` is the day-by-day log of what broke and what was learned
+`docs/journey.md` is the day-by-day log of what broke and what was learned
 fixing it. `README.md` is the front door to all of that.
 
 ## Open gaps, as of this writing
 
 - `APP_COST_THRESHOLD` is now calibrated against real Pagila data
-  (40,000 -- see JOURNEY.md for the full measurements), not guessed.
+  (40,000 -- see docs/journey.md for the full measurements), not guessed.
   One real, accepted gap surfaced doing that: a cross join confined to
   small dimension tables (hundreds of rows each) costs *less* than the
   heaviest legitimate analytical query, so no single threshold can
@@ -280,7 +279,7 @@ fixing it. `README.md` is the front door to all of that.
   magnitude.
 - The console's pages are verified via FastAPI's `TestClient` (the real
   HTTP layer), but never visually confirmed in an actual browser — a
-  preview-sandbox limitation hit while building it, see JOURNEY.md.
+  preview-sandbox limitation hit while building it, see docs/journey.md.
 - The demo database used to live on a managed host that doesn't allow
   `CREATE ROLE`, so it had no read-only role and, until read-only
   transactions were added, relied on the app-level validator alone. `deploy/setup_demo_database.sh` moves it to the VPS's

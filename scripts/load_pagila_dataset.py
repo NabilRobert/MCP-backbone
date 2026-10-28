@@ -47,7 +47,7 @@ advance -- see the comments next to each one:
 After loading, every table's row count is checked against the dump
 file itself (not a guessed number) -- "psql didn't error" was never
 proof the data actually landed correctly, and on one real run it
-didn't (see JOURNEY.md for the pooler bug that caused that). On a
+didn't (see docs/journey.md for the pooler bug that caused that). On a
 mismatch the target is scrubbed and the whole load retried from
 scratch, up to MAX_ATTEMPTS times, since the one realistic cause of a
 clean-looking run producing wrong counts is a transient hiccup

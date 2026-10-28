@@ -314,7 +314,7 @@ reads, not in the user's prompt).
 
 Every claim above with a "confirmed by testing" or "verified" note was
 checked against a real Postgres instance, not reasoned about on paper —
-see `JOURNEY.md` for the actual test sessions, including the cases where
+see `docs/journey.md` for the actual test sessions, including the cases where
 the first assumption was wrong. The repeatable version of that
-verification is `tests/test_red_team.py` — see `RED_TEAM.md` for the
+verification is `tests/test_red_team.py` — see `docs/red-team.md` for the
 full catalog and current pass/fail results.

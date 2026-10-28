@@ -246,7 +246,7 @@ and cost, and makes the score hard to reproduce.
 **Consequences:** The questions must have one unambiguous answer, so each
 one is checked against the data first (no ties at a top-N cut-off, time
 zones stated). One question still turned out ambiguous; it's recorded in
-`BENCHMARK.md` rather than re-scored. Hand-written questions on Pagila
+`docs/benchmark.md` rather than re-scored. Hand-written questions on Pagila
 aren't comparable to public leaderboard scores.
 **Sources:** Yu et al., [Spider](https://arxiv.org/abs/1809.08887) (2018);
 Li et al., [BIRD](https://arxiv.org/abs/2305.03111) (2023), whose headline

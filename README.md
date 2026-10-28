@@ -49,18 +49,18 @@ might fail:
 4. **Execution limits:** a statement timeout, and results capped at 200 rows.
 5. **The database itself:** every transaction is `READ ONLY`, and where
    possible the login is a read-only role too. Each covers a gap the other
-   has (see [THREAT_MODEL.md](THREAT_MODEL.md)).
+   has (see the [threat model](docs/threat-model.md)).
 6. **Audit:** every attempt, including rejected ones, is logged before a
    result is returned. A web console shows the log live, filterable by
    status and query text, with a 14-day chart.
 
 Proven by an adversarial suite that sends writes straight to the database,
-bypassing the validator: [RED_TEAM.md](RED_TEAM.md).
+bypassing the validator: [red-team results](docs/red-team.md).
 
 **How well an AI uses it:** `gpt-5-mini` answered 29 of 30 hand-written
 questions over the demo database correctly under strict grading (exact
 columns and values), 30 of 30 leniently. Every miss across both runs is
-explained in [BENCHMARK.md](BENCHMARK.md), including a tool fix and a
+explained in the [benchmark report](docs/benchmark.md), including a tool fix and a
 question fix that came out of the first run.
 
 ## Use it
@@ -108,7 +108,7 @@ request's `_meta`. Off without the variable. No SQL text or rejection
 reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
 [app/tracing.py](app/tracing.py).
 
-**Tests** (130, against real Postgres, run in CI on every push) need a
+**Tests** (163, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
 `CREATEROLE`, because the red-team tests create real throwaway roles:
@@ -133,31 +133,40 @@ app/
   mcp/        the MCP tools: a thin adapter, no business logic
   benchmark/  text-to-SQL eval cases and grading
 migrations/   Alembic migrations for the bookkeeping database
-tests/        141 tests against real Postgres, incl. the red-team suite
+tests/        163 tests against real Postgres, incl. the red-team suite
 static-src/   the console's TypeScript (compiled into app/console/static)
 plugin/       the Claude Code plugin (MCP registration + query skill)
 deploy/       systemd unit, Caddy block, firewall, backups, runbook
 scripts/      operator CLIs: invites, seeding, datasets, benchmark
+docs/         architecture, threat model, results, build log, planning
 ```
 
-## More
+## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): a guided tour of the code, following a
+How it works:
+- [Architecture](docs/architecture.md): a guided tour of the code, following a
   request through it. Start here.
-- [THREAT_MODEL.md](THREAT_MODEL.md): what it defends against, how, and
+- [Decisions (ADRs)](docs/planning/phase-5-architecture-decisions.md): ten
+  decisions, each with alternatives, consequences and sources.
+- [Threat model](docs/threat-model.md): what it defends against, how, and
   what it doesn't.
-- [RED_TEAM.md](RED_TEAM.md): the adversarial suite and its results,
+
+Results and evidence:
+- [Red team](docs/red-team.md): the adversarial suite and its results,
   including the limits it demonstrates.
-- [BENCHMARK.md](BENCHMARK.md): how well an AI agent answers real questions
+- [Benchmark](docs/benchmark.md): how well an AI agent answers real questions
   through it, graded strictly and leniently, with every miss explained.
-- [deploy/RUNBOOK.md](deploy/RUNBOOK.md): running, monitoring, restoring and
+
+Running it:
+- [Runbook](deploy/RUNBOOK.md): running, monitoring, restoring and
   rebuilding the production server.
-- [JOURNEY.md](JOURNEY.md): the build log. What broke, what was assumed
-  and turned out wrong, and why each decision landed where it did.
-- [Architecture decisions (ADRs)](docs/planning/phase-5-architecture-decisions.md):
-  ten decisions, each with alternatives, consequences and sources.
-- [docs/planning/](docs/planning/): the full planning trail written before
-  the build, from problem brief to sliced work plan.
+
+History:
+- [Build log](docs/journey.md): what broke, what was assumed and turned out
+  wrong, and why each decision landed where it did.
+- [Planning trail](docs/planning/README.md): the specs and plans written
+  before the build, from problem brief to sliced work plan, including the
+  spikes that tested the riskiest assumptions.
 
 ## License
 

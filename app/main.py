@@ -95,7 +95,7 @@ app.include_router(console_router)
 # files the console's pages need, at /console/static/...
 app.mount("/console/static", StaticFiles(directory=STATIC_DIR), name="console-static")
 # The actual MCP server, reachable over a real network connection for
-# the first time -- see JOURNEY.md for why that wasn't true before.
+# the first time -- see docs/journey.md for why that wasn't true before.
 app.mount("/mcp", mcp_app)
 
 
