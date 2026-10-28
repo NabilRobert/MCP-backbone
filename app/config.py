@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     query_timeout_seconds: int = 5  # kill a real query after this long
     explain_timeout_seconds: int = 2  # kill the cost-estimate step after this long
     # Reject a query estimated pricier than this. Calibrated against
-    # real Pagila data -- see .env.example and JOURNEY.md for the
+    # real Pagila data -- see .env.example and docs/journey.md for the
     # actual measurements behind this number and a known gap it
     # doesn't close.
     cost_threshold: int = 40_000

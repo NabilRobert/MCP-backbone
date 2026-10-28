@@ -1,7 +1,7 @@
 # Red-Team Suite Results
 
 The adversarial test suite for the safety layer, as called for in
-[phase-1-problem-brief.md](docs/planning/phase-1-problem-brief.md)'s success metrics:
+[phase-1-problem-brief.md](planning/phase-1-problem-brief.md)'s success metrics:
 "A red-team test suite for the safety layer exists and its pass/fail
 results are published, not just claimed."
 
@@ -11,7 +11,7 @@ results are published, not just claimed."
 
 ## What's covered
 
-Organized by the threats listed in [THREAT_MODEL.md](THREAT_MODEL.md):
+Organized by the threats listed in [the threat model](threat-model.md):
 
 | Threat | Attack attempted | Defense proven |
 |---|---|---|
@@ -31,9 +31,9 @@ Organized by the threats listed in [THREAT_MODEL.md](THREAT_MODEL.md):
 ## What this suite deliberately does NOT try to prove
 
 Per the "shrink, don't cut" fallback decided in
-[phase-7-slices-plan.md](docs/planning/phase-7-slices-plan.md): this is a focused set
+[phase-7-slices-plan.md](planning/phase-7-slices-plan.md): this is a focused set
 of representative attacks, not an exhaustive catalog of every Postgres
-function or encoding trick. See `THREAT_MODEL.md`'s "what this doesn't
+function or encoding trick. See `docs/threat-model.md`'s "what this doesn't
 defend against" section for the honestly-stated boundaries — e.g. a
 compromised operator machine, or a target schema's owner adding a
 dangerous function disguised with a name sqlglot happens to also
@@ -44,7 +44,7 @@ than assumed away).
 It also doesn't test prompt injection through database contents (data
 that tells the model to do something). That depends on the model and the
 client's other tools, not on this server's code, so a pass/fail test here
-would prove little. THREAT_MODEL.md T10 states what the server guarantees
+would prove little. docs/threat-model.md T10 states what the server guarantees
 regardless and what it can't.
 
 ## Scale-up plan

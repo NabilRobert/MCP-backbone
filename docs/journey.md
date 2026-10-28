@@ -335,7 +335,7 @@ coverage that isn't real.
 The most honest result in the whole suite is probably
 `test_security_definer_function_succeeds_if_validator_is_bypassed` --
 a test that's *supposed* to pass by demonstrating an attack succeeding,
-specifically to prove the documented residual risk in THREAT_MODEL.md
+specifically to prove the documented residual risk in docs/threat-model.md
 is real and not just a hedge. A red-team suite that only ever shows
 green checkmarks for things blocked isn't telling the whole story.
 
@@ -943,7 +943,7 @@ same Sumopod database the whole time -- the "create a new database for
 bookkeeping" step from the original deploy walkthrough never actually
 happened there.
 
-This is exactly the failure THREAT_MODEL.md's separation between
+This is exactly the failure docs/threat-model.md's separation between
 these two databases exists to prevent: any AI client calling
 `run_query` could read API key hashes, console password hashes, and
 the complete audit log of every query anyone has ever run through this
@@ -1296,7 +1296,7 @@ per day. The daily total counts real rows (`Workspace.created_via`), so
 it survives restarts. The per-IP count is in memory like the login
 lockout, so a restart resets it, which is acceptable at this scale.
 
-The honest cost, recorded in THREAT_MODEL.md rather than buried: the
+The honest cost, recorded in docs/threat-model.md rather than buried: the
 demo database has no read-only role (its managed host doesn't allow
 creating one). Strangers' queries against it are stopped by the app's own
 validator alone, not by the database as well. The validator is what the
@@ -1474,7 +1474,7 @@ Second benchmark run, after those two fixes: **29/30 strict, 30/30
 lenient.** Both run-1 failures now pass. The one strict miss is the
 agent adding a `category_id` column next to the right category and total:
 exactly the case the lenient grader exists for, and the reason both scores
-are published. Both runs stay in `BENCHMARK.md` side by side, with what
+are published. Both runs stay in `docs/benchmark.md` side by side, with what
 changed between them, rather than the better number replacing the worse.
 
 ## 2026-10-22 (continued) — MIT license, and prompt injection on the record

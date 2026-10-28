@@ -1,6 +1,6 @@
 """The red-team suite (Slice F). Each test here is one adversarial
 attempt against the safety layer, organized by the threats listed in
-THREAT_MODEL.md. This file IS the "published" evidence Phase 1 asked
+docs/threat-model.md. This file IS the "published" evidence Phase 1 asked
 for -- run `pytest tests/test_red_team.py -v` and every test name states
 exactly what was attempted and what should have happened.
 
@@ -139,7 +139,7 @@ async def test_security_definer_function_rejected_by_validator(
 async def test_security_definer_function_succeeds_if_validator_is_bypassed(
     db_session: AsyncSession, readonly_role_workspace: tuple[Workspace, str]
 ) -> None:
-    """The documented residual risk from THREAT_MODEL.md, demonstrated
+    """The documented residual risk from docs/threat-model.md, demonstrated
     rather than just claimed: if a target database the operator doesn't
     own already has a SECURITY DEFINER function, calling it directly
     (bypassing our validator) DOES succeed in writing data, even
