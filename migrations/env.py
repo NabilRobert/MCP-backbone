@@ -15,9 +15,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-import app.auth.models
-import app.benchmark.models
-import app.query.models  # noqa: F401
+# Imported only for their side effect: each module registers its tables on
+# Base.metadata, which is how Alembic sees the models. Nothing here uses
+# them by name, so the linters are told the imports are deliberate.
+import app.auth.models  # pyright: ignore[reportUnusedImport]
+import app.benchmark.models  # pyright: ignore[reportUnusedImport]
+import app.query.models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.config import settings
 from app.db import Base
 
