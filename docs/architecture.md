@@ -55,7 +55,11 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    than hanging forever, retries only if the *connection* itself dropped
    (never retries just because a query was slow), and — critically —
    always writes down what happened in the audit log, whether the query
-   succeeded, failed, or was rejected. `get_data_source` here is a small
+   succeeded, failed, or was rejected. Each step is its own small
+   function (`_check_rate_limit`, `_validate`, `_estimate_cost`,
+   `_execute`), and `run_query` just calls them in order; every step
+   returns a `QueryOutcome` when it ends the request, and `_finish`
+   audits it. `get_data_source` here is a small
    shared helper (used by several files) that looks up which real
    external database a workspace is allowed to query, and re-runs the
    address guard (`app/query/network_guard.py`) on it every time.
@@ -99,6 +103,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
   claimed first, in the same transaction as everything else, so a
   failed signup leaves it unused. A user-supplied URL is
   address-checked and connected to before anything is saved.
+- **`app/auth/workspaces.py`** — `create_workspace`: the workspace, its
+  database, console login and first API key, built from a
+  `WorkspaceSpec`. Shared by signup and `scripts/seed_workspace.py`, so
+  both make a workspace the same way.
 - **`app/query/network_guard.py`** — refuses a connection URL that
   resolves to a loopback/private/metadata address, or that carries
   parameters which could add a second host. Without it, a user could
@@ -158,7 +166,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
 - **`app/console/routes.py`** — the web dashboard's pages: signup, login,
   logout, a dashboard showing the real audit trail (filterable by status
   and query text, with a 14-day chart of queries per day), and a keys
-  page that issues a key at a chosen access level or revokes it.
+  page that issues a key at a chosen access level or revokes it. Pages
+  that need a login declare the `require_login` dependency; without a
+  login it raises `LoginRequired`, which `app/main.py` turns into a
+  redirect to the login page.
 - **`app/console/throttle.py`** — per-IP limits: locks out a client IP
   after repeated failed logins or signups, and caps demo signups per IP
   per day. Stored in the database (`ThrottleEvent`, hashed IPs, pruned

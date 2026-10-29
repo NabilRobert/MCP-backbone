@@ -6,7 +6,7 @@ see it in a browser."""
 
 import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import Workspace
 from app.auth.scopes import PRESETS, describe_scopes
 from app.auth.service import get_active_api_key, revoke_api_key, rotate_api_key
-from app.auth.signup import MIN_PASSWORD_LENGTH, SignupError, sign_up
+from app.auth.signup import MIN_PASSWORD_LENGTH, SignupError, SignupForm, sign_up
 from app.config import settings
 from app.console import throttle
 from app.console.auth import (
@@ -43,15 +43,26 @@ AUDIT_STATUSES = ("succeeded", "rejected", "errored", "timed_out")
 DAILY_CHART_DAYS = 14
 
 
-async def _require_login(request: Request, session: AsyncSession) -> Workspace | RedirectResponse:
-    """Used at the top of every protected route below: returns the
-    logged-in Workspace if there is one, or a ready-to-return redirect
-    to the login page if not. (A plain FastAPI dependency can't short-
-    circuit a route by itself, so each route checks this explicitly.)"""
+class LoginRequired(Exception):
+    """Raised by require_login when the browser isn't logged in. app/main.py
+    turns it into a redirect to the login page (redirect_to_login)."""
+
+
+async def require_login(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> Workspace:
+    """A dependency for every protected route below: the logged-in
+    Workspace, or LoginRequired. FastAPI hands the route the same
+    database session, since a dependency runs once per request."""
     workspace = await get_logged_in_workspace(request, session)
     if workspace is None:
-        return RedirectResponse("/console/login", status_code=303)
+        raise LoginRequired
     return workspace
+
+
+async def redirect_to_login(_request: Request, _exc: Exception) -> RedirectResponse:
+    """The exception handler for LoginRequired (registered in app/main.py)."""
+    return RedirectResponse("/console/login", status_code=303)
 
 
 def _client_ip(request: Request) -> str:
@@ -118,20 +129,17 @@ async def signup_form(request: Request):
 @router.post("/signup")
 async def signup_submit(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    invite_code: str = Form(""),
-    connection_url: str = Form(""),
+    form: Annotated[SignupForm, Form()],
     session: AsyncSession = Depends(get_session),
 ):
     ip = _client_ip(request)
-    context = {"min_password": MIN_PASSWORD_LENGTH, "username": username}
+    context = {"min_password": MIN_PASSWORD_LENGTH, "username": form.username}
     if await _login_blocked(session, ip):
         return templates.TemplateResponse(
             request, "signup.html", {**context, "error": _TOO_MANY_ATTEMPTS}, status_code=429
         )
     try:
-        result = await sign_up(session, invite_code, username, password, connection_url, ip)
+        result = await sign_up(session, form, ip)
     except SignupError as exc:
         await throttle.record(session, throttle.LOGIN, ip)
         return templates.TemplateResponse(
@@ -153,13 +161,14 @@ async def signup_submit(
 
 
 @router.post("/sessions/revoke")
-async def sessions_revoke(request: Request, session: AsyncSession = Depends(get_session)):
+async def sessions_revoke(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    workspace: Workspace = Depends(require_login),
+):
     """ "Log out everywhere": every console session for this workspace,
     on every browser, stops working, including this one."""
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    await revoke_all_sessions(session, workspace_or_redirect)
+    await revoke_all_sessions(session, workspace)
     log_out(request)
     return RedirectResponse("/console/login", status_code=303)
 
@@ -170,30 +179,27 @@ async def logout(request: Request):
     return RedirectResponse("/console/login", status_code=303)
 
 
-@router.get("/")
-async def dashboard(request: Request, session: AsyncSession = Depends(get_session)):
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
+@router.get("/", dependencies=[Depends(require_login)])
+async def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html", {})
 
 
 @router.get("/keys")
-async def keys(request: Request, session: AsyncSession = Depends(get_session)):
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    workspace = workspace_or_redirect
+async def keys(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    workspace: Workspace = Depends(require_login),
+):
 
     return await _keys_page(request, session, workspace, new_key=None)
 
 
 @router.post("/keys/revoke")
-async def keys_revoke(request: Request, session: AsyncSession = Depends(get_session)):
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    workspace = workspace_or_redirect
+async def keys_revoke(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    workspace: Workspace = Depends(require_login),
+):
 
     await revoke_api_key(session, workspace)
     return await _keys_page(request, session, workspace, new_key=None)
@@ -204,11 +210,8 @@ async def keys_rotate(
     request: Request,
     access: str = Form("full"),
     session: AsyncSession = Depends(get_session),
+    workspace: Workspace = Depends(require_login),
 ):
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    workspace = workspace_or_redirect
     if access not in PRESETS:
         return templates.TemplateResponse(
             request,
@@ -247,20 +250,16 @@ async def _keys_page(
 
 @router.get("/api/audit", response_model=None)
 async def api_audit(
-    request: Request,
     status: str = "",
     q: str = "",
     session: AsyncSession = Depends(get_session),
-) -> list[dict[str, Any]] | RedirectResponse | JSONResponse:
+    workspace: Workspace = Depends(require_login),
+) -> list[dict[str, Any]] | JSONResponse:
     """Returns the most recent audit log rows for the logged-in
     workspace as JSON -- polled periodically by the dashboard page's
     TypeScript to refresh the table without a full page reload.
     Optional filters: `status` (one of AUDIT_STATUSES) and `q`, a
     case-insensitive substring of the query text."""
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    workspace = workspace_or_redirect
     if status and status not in AUDIT_STATUSES:
         return JSONResponse({"error": f"unknown status {status!r}"}, status_code=400)
 
@@ -286,14 +285,11 @@ async def api_audit(
 
 @router.get("/api/audit/daily", response_model=None)
 async def api_audit_daily(
-    request: Request, session: AsyncSession = Depends(get_session)
-) -> list[dict[str, Any]] | RedirectResponse:
+    session: AsyncSession = Depends(get_session),
+    workspace: Workspace = Depends(require_login),
+) -> list[dict[str, Any]]:
     """Per-day counts by status for the last DAILY_CHART_DAYS days (UTC),
     zero-filled, for the dashboard's chart."""
-    workspace_or_redirect = await _require_login(request, session)
-    if isinstance(workspace_or_redirect, RedirectResponse):
-        return workspace_or_redirect
-    workspace = workspace_or_redirect
 
     today = datetime.datetime.now(datetime.UTC).date()
     first_day = today - datetime.timedelta(days=DAILY_CHART_DAYS - 1)

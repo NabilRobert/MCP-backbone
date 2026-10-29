@@ -20,8 +20,8 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
+from app.console.routes import LoginRequired, redirect_to_login, templates
 from app.console.routes import router as console_router
-from app.console.routes import templates
 from app.crypto import check_encryption_key
 from app.db import SessionLocal, dispose_target_engines
 from app.mcp.server import mcp
@@ -91,6 +91,8 @@ app.add_middleware(
 )
 
 app.include_router(console_router)
+# A console route that needs a login sends the browser to the login page.
+app.add_exception_handler(LoginRequired, redirect_to_login)
 # Serves the compiled TypeScript (see static-src/) and any other static
 # files the console's pages need, at /console/static/...
 app.mount("/console/static", StaticFiles(directory=STATIC_DIR), name="console-static")
