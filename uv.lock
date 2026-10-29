@@ -614,6 +614,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sqlglot" },
+    { name = "sqlparse" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -653,6 +654,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "sqlglot", specifier = ">=25.0" },
+    { name = "sqlparse", specifier = ">=0.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 provides-extras = ["dev", "benchmark"]
@@ -2414,6 +2416,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0c/40/4afe7d21cdf3dbb5a7529ea33a0e07055081fb3d37bc0550e7c2278d6ec0/sqlglot-30.23.0.tar.gz", hash = "sha256:34b5b62fa4cbf042ee6b9e829236577b2f8db4538dd20007de2aa5383c92e845", size = 6108071, upload-time = "2026-10-14T21:48:38.209Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2d/73/9e749f3e57ca471bf663eb6d51fbe79b9921c5b7376706cd1cac999c8e2e/sqlglot-30.23.0-py3-none-any.whl", hash = "sha256:b5a645722cb4c6b649e9131b94830d9df9a557e87be63713179d848320f2baa1", size = 783709, upload-time = "2026-10-14T21:48:36.327Z" },
+]
+
+[[package]]
+name = "sqlparse"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5f/d3/3f06a1006f2261d1342aefb3c71eed02f5d4ca5bdbecd86ebc12ad38306e/sqlparse-0.6.0.tar.gz", hash = "sha256:113c35c75365ab9cc9c7231d68c6428fb11c085fc8e9eb1ad659b7ddbf6cd2b9", size = 178477, upload-time = "2026-08-13T19:16:06.396Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/50/f00935da0ec7cbf325f8dc4f772ae46fbc7b672dd62876e73f0a94adda57/sqlparse-0.6.0-py3-none-any.whl", hash = "sha256:b861c0288ce2fa56209a9a6412d2e066ac664b3873b89c26c9d8415e8e32996f", size = 50070, upload-time = "2026-08-13T19:16:04.062Z" },
 ]
 
 [[package]]
