@@ -61,6 +61,8 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
+import sqlparse
+
 SCHEMA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-schema.sql"
 DATA_URL = "https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagila-data.sql"
 MAX_ATTEMPTS = 5
@@ -68,85 +70,6 @@ MAX_ATTEMPTS = 5
 # Matches a pg_dump COPY header like:
 #   COPY public.actor (actor_id, first_name, last_name, last_update) FROM stdin;
 _COPY_HEADER = re.compile(r"^COPY\s+(?:public\.)?(\S+)\s*\(([^)]*)\)\s+FROM stdin;$")
-
-_DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
-
-
-def _split_sql_statements(sql: str) -> list[str]:
-    """Splits a block of SQL on top-level semicolons only -- "top-level"
-    meaning not inside a quoted string, a "--" line comment, or a
-    dollar-quoted function body (e.g. $$ ... $$ or $tag$ ... $tag$).
-    Function/trigger bodies can contain semicolons of their own, and
-    pg_dump's own "-- Name: public; Type: SCHEMA; ..." comment headers
-    contain several more -- none of those are statement separators. A
-    plain `sql.split(";")` (fine for load_demo_dataset.py's much
-    simpler schema, which has neither) would corrupt both."""
-    statements: list[str] = []
-    current: list[str] = []
-    i = 0
-    n = len(sql)
-    in_single_quote = False
-    dollar_tag: str | None = None
-
-    while i < n:
-        char = sql[i]
-
-        if dollar_tag is not None:
-            if sql.startswith(dollar_tag, i):
-                current.append(dollar_tag)
-                i += len(dollar_tag)
-                dollar_tag = None
-                continue
-            current.append(char)
-            i += 1
-            continue
-
-        if in_single_quote:
-            current.append(char)
-            if char == "'" and sql[i + 1 : i + 2] == "'":
-                current.append("'")
-                i += 2
-                continue
-            if char == "'":
-                in_single_quote = False
-            i += 1
-            continue
-
-        if char == "-" and sql[i + 1 : i + 2] == "-":
-            end = sql.find("\n", i)
-            end = n if end == -1 else end + 1
-            current.append(sql[i:end])
-            i = end
-            continue
-
-        if char == "'":
-            in_single_quote = True
-            current.append(char)
-            i += 1
-            continue
-
-        if char == "$":
-            match = _DOLLAR_TAG.match(sql, i)
-            if match:
-                dollar_tag = match.group(0)
-                current.append(dollar_tag)
-                i += len(dollar_tag)
-                continue
-
-        if char == ";":
-            current.append(char)
-            statements.append("".join(current))
-            current = []
-            i += 1
-            continue
-
-        current.append(char)
-        i += 1
-
-    tail = "".join(current).strip()
-    if tail:
-        statements.append(tail)
-    return statements
 
 
 def _download_if_missing(url: str, dest: Path) -> None:
@@ -181,7 +104,11 @@ def _patch_schema(schema_sql: str) -> str:
     patched_sql = schema_sql.replace("DEFAULT uuidv7()", "DEFAULT gen_random_uuid()")
     patched_sql = patched_sql.replace(") VIRTUAL", ") STORED")
 
-    statements = _split_sql_statements(patched_sql)
+    # sqlparse splits on top-level semicolons only: not inside a quoted
+    # string, a "--" comment or a dollar-quoted function body, all of
+    # which this schema has. On the real schema it gives the same 388
+    # statements the hand-written splitter it replaced did.
+    statements = sqlparse.split(patched_sql)
     kept = [
         s
         for s in statements

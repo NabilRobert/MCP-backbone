@@ -6,6 +6,7 @@ matter how it turns out."""
 
 import asyncio
 import datetime
+from dataclasses import dataclass, field
 from typing import Any
 
 import asyncpg  # pyright: ignore[reportMissingTypeStubs] -- asyncpg ships no stubs
@@ -13,7 +14,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import Inspector
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
@@ -80,14 +81,21 @@ async def get_data_source(session: AsyncSession, workspace: Workspace) -> DataSo
     return data_source
 
 
+@dataclass(frozen=True)
+class QueryOutcome:
+    """How one query attempt ended: what the audit log records, and what
+    the caller is told. `status` is "succeeded", "rejected", "errored" or
+    "timed_out"; `error` is the reason for anything but success."""
+
+    status: str
+    error: str | None = None
+    cost: float | None = None
+    rows: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    is_truncated: bool = False
+
+
 async def write_audit(
-    session: AsyncSession,
-    workspace: Workspace,
-    data_source: DataSourceConnection,
-    sql: str,
-    status: str,
-    cost_estimate: float | None,
-    rejection_reason: str | None,
+    session: AsyncSession, data_source: DataSourceConnection, sql: str, outcome: QueryOutcome
 ) -> None:
     """Writes one row to the audit log. This is called no matter how a
     query attempt ends up -- succeeded, rejected, timed out, or errored
@@ -99,7 +107,7 @@ async def write_audit(
     itself had a problem."""
     # The outcome, on the request's own span (this always runs directly
     # under it), so the trace viewer can search calls by it.
-    trace.get_current_span().set_attribute("mcp_backbone.query.status", status)
+    trace.get_current_span().set_attribute("mcp_backbone.query.status", outcome.status)
     with stage(
         "audit",
         kind=SpanKind.CLIENT,
@@ -111,12 +119,12 @@ async def write_audit(
     ):
         session.add(
             QueryExecution(
-                workspace_id=workspace.id,
+                workspace_id=data_source.workspace_id,
                 data_source_connection_id=data_source.id,
                 query_text=sql,
-                status=status,
-                cost_estimate=cost_estimate,
-                rejection_reason=rejection_reason,
+                status=outcome.status,
+                cost_estimate=outcome.cost,
+                rejection_reason=outcome.error,
                 created_at=datetime.datetime.now(datetime.UTC),
             )
         )
@@ -133,7 +141,7 @@ async def record_refusal(
         data_source = await get_data_source(session, workspace)
     except QueryExecutionError:
         return
-    await write_audit(session, workspace, data_source, sql, "rejected", None, reason)
+    await write_audit(session, data_source, sql, QueryOutcome(status="rejected", error=reason))
 
 
 def visible_table_names(sync_conn: Any) -> list[str]:
@@ -173,16 +181,34 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     error message (empty unless something went wrong). A result cut off
     at the cap also carries truncated=True and a note saying so.
 
-    Each step is timed as its own span in the request's trace
-    (app/tracing.py): rate_limit, validate, cost_check, execute, then
-    audit. A step that ends the request marks its span; the audit is
-    written outside the steps' spans, so it shows as their sibling."""
+    Each step below is its own function, timed as its own span in the
+    request's trace (app/tracing.py): rate_limit, validate, cost_check,
+    execute, then audit. A step that ends the request returns the
+    outcome, and the audit is written outside the steps' spans, so it
+    shows as their sibling."""
     data_source = await get_data_source(session, workspace)
 
-    # Step 1: has this workspace made too many requests recently? This
-    # check happens before anything else, so it still counts even for a
-    # request that would've been rejected anyway.
-    limited: RateLimitExceeded | None = None
+    refusal = await _check_rate_limit(session, workspace)
+    if refusal is not None:
+        return await _finish(session, data_source, sql, refusal)
+
+    validated = _validate(sql)
+    if isinstance(validated, QueryOutcome):
+        return await _finish(session, data_source, sql, validated)
+
+    async with get_target_engine(data_source.connection_url).connect() as conn:
+        cost = await _estimate_cost(conn, validated)
+        if isinstance(cost, QueryOutcome):
+            return await _finish(session, data_source, sql, cost)
+        outcome = await _execute(conn, validated, cost)
+
+    return await _finish(session, data_source, sql, outcome)
+
+
+async def _check_rate_limit(session: AsyncSession, workspace: Workspace) -> QueryOutcome | None:
+    """Step 1: has this workspace made too many requests recently? This
+    runs before anything else, so it still counts a request that
+    would've been rejected anyway. Returns the refusal, or None."""
     with stage("rate_limit") as span:
         try:
             await check_and_increment(
@@ -193,130 +219,138 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
             )
         except RateLimitExceeded as exc:
             mark_failed(span, "rate_limited", exc.reason)
-            limited = exc
-    if limited is not None:
-        await write_audit(session, workspace, data_source, sql, "rejected", None, limited.reason)
-        return {"status": "rejected", "rows": [], "error": limited.reason}
+            return QueryOutcome(status="rejected", error=exc.reason)
+    return None
 
-    # Step 2: is this SQL even safe? (see app/query/validation.py for
-    # exactly what "safe" means here.) Nothing below this point ever
-    # runs for a query that fails this check -- it's rejected before any
-    # database connection to the real target is even opened.
-    normalized_sql = ""
-    rejected: QueryRejected | None = None
+
+def _validate(sql: str) -> str | QueryOutcome:
+    """Step 2: is this SQL even safe? (see app/query/validation.py for
+    exactly what "safe" means here.) Returns the normalized SQL, or the
+    refusal. A refused query never opens a connection to the target."""
     with stage("validate") as span:
         try:
-            normalized_sql = validate_and_normalize(sql)
+            return validate_and_normalize(sql)
         except QueryRejected as exc:
             mark_failed(span, "rejected_by_validation", exc.reason)
-            rejected = exc
-    if rejected is not None:
-        await write_audit(session, workspace, data_source, sql, "rejected", None, rejected.reason)
-        return {"status": "rejected", "rows": [], "error": rejected.reason}
+            return QueryOutcome(status="rejected", error=exc.reason)
 
-    status = "succeeded"
-    error_message: str | None = None
-    cost: float | None = None
-    rows: list[dict[str, Any]] = []
-    truncated = False
 
-    async with get_target_engine(data_source.connection_url).connect() as conn:
-        # Step 3: how expensive would this query be? (see
-        # app/query/cost_check.py.) Only reached once the SQL has
-        # already passed the safety check above.
-        cost_outcome: tuple[str, str] | None = None
-        with stage(
-            "cost_check",
-            kind=SpanKind.CLIENT,
-            attributes={
-                **DB_ATTRIBUTES,
-                "db.operation.name": "EXPLAIN",
-                "mcp_backbone.cost.threshold": settings.cost_threshold,
-            },
-        ) as span:
-            try:
-                cost = await check_cost(
-                    conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
-                )
-                span.set_attribute("mcp_backbone.cost.estimate", cost)
-            except QueryRejected as exc:
-                mark_failed(span, "rejected_by_cost", exc.reason)
-                cost_outcome = ("rejected", exc.reason)
-            except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
-                mark_failed(span, type(exc).__qualname__, str(exc))
-                cost_outcome = ("errored", str(exc))
-        if cost_outcome is not None:
-            outcome, reason = cost_outcome
-            await write_audit(session, workspace, data_source, sql, outcome, None, reason)
-            return {"status": outcome, "rows": [], "error": reason}
-
-        with stage(
-            "execute",
-            kind=SpanKind.CLIENT,
-            attributes={**DB_ATTRIBUTES, "db.operation.name": "SELECT"},
-        ) as span:
-            if settings.otel_capture_content:
-                span.set_attribute("db.query.text", normalized_sql)
-
-            # Step 4: actually run the query, but with a safety net -- if
-            # it takes longer than this timeout, Postgres kills it
-            # itself rather than letting it run forever.
-            await conn.execute(
-                text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
+async def _estimate_cost(conn: AsyncConnection, normalized_sql: str) -> float | QueryOutcome:
+    """Step 3: how expensive would this query be? (see
+    app/query/cost_check.py.) Returns the estimate, or the outcome that
+    ends the request: a rejection over the threshold, or an error (e.g.
+    EXPLAIN on a table that doesn't exist)."""
+    with stage(
+        "cost_check",
+        kind=SpanKind.CLIENT,
+        attributes={
+            **DB_ATTRIBUTES,
+            "db.operation.name": "EXPLAIN",
+            "mcp_backbone.cost.threshold": settings.cost_threshold,
+        },
+    ) as span:
+        try:
+            cost = await check_cost(
+                conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
             )
+        except QueryRejected as exc:
+            mark_failed(span, "rejected_by_cost", exc.reason)
+            return QueryOutcome(status="rejected", error=exc.reason)
+        except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
+            mark_failed(span, type(exc).__qualname__, str(exc))
+            return QueryOutcome(status="errored", error=str(exc))
+        span.set_attribute("mcp_backbone.cost.estimate", cost)
+        return cost
 
-            # Try running the query, up to MAX_ATTEMPTS times. Most
-            # queries succeed on the very first try; the loop only
-            # exists to retry the rare case where the database
-            # CONNECTION itself dropped (see TRANSIENT_EXCEPTIONS above).
-            attempts = 0
-            for attempt in range(1, MAX_ATTEMPTS + 1):
-                attempts = attempt
-                try:
-                    # Streamed through a server-side cursor and cut off at
-                    # the cap: the cost check limits how expensive a query
-                    # is, not how big its result is, and a cheap
-                    # "select * from rental" is 16,000 rows -- far too many
-                    # to hand an AI model. One extra row is fetched only to
-                    # tell "exactly at the cap" from "cut off".
-                    result = await conn.stream(text(normalized_sql))
-                    fetched = await result.fetchmany(settings.max_result_rows + 1)
-                    await result.close()
-                    truncated = len(fetched) > settings.max_result_rows
-                    rows = [
-                        dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
-                        for row in fetched[: settings.max_result_rows]
-                    ]
-                    break  # success -- stop trying
-                except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
-                    cause = _asyncpg_cause(exc)
-                    if isinstance(cause, asyncpg.exceptions.QueryCanceledError):
-                        # The timeout from step 4 kicked in. Never retry
-                        # this -- the query was just too slow, and
-                        # trying again would just be slow again.
-                        status, error_message = "timed_out", "statement timeout exceeded"
-                        break
-                    if isinstance(cause, TRANSIENT_EXCEPTIONS) and attempt < MAX_ATTEMPTS:
-                        # The connection itself broke, not the query --
-                        # worth a short pause and one more try.
-                        await asyncio.sleep(RETRY_BACKOFF_SECONDS)
-                        continue
-                    # Anything else: give up and report it as an error.
-                    status, error_message = "errored", str(exc)
-                    break
 
-            span.set_attribute("mcp_backbone.execute.attempts", attempts)
-            if status == "succeeded":
-                span.set_attribute("db.response.returned_rows", len(rows))
-                span.set_attribute("mcp_backbone.result.truncated", truncated)
-            else:
-                mark_failed(span, status, error_message or "")
+async def _execute(conn: AsyncConnection, normalized_sql: str, cost: float) -> QueryOutcome:
+    """Step 4: actually run the query, with a safety net -- if it takes
+    longer than the timeout, Postgres kills it itself rather than
+    letting it run forever."""
+    with stage(
+        "execute",
+        kind=SpanKind.CLIENT,
+        attributes={**DB_ATTRIBUTES, "db.operation.name": "SELECT"},
+    ) as span:
+        if settings.otel_capture_content:
+            span.set_attribute("db.query.text", normalized_sql)
+        await conn.execute(
+            text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
+        )
 
-    # Step 5: no matter what happened above, write it to the audit log
-    # before telling the caller the result.
-    await write_audit(session, workspace, data_source, sql, status, cost, error_message)
-    response: dict[str, Any] = {"status": status, "rows": rows, "error": error_message}
-    if truncated:
+        outcome, attempts = await _run_with_retry(conn, normalized_sql, cost)
+
+        span.set_attribute("mcp_backbone.execute.attempts", attempts)
+        if outcome.status == "succeeded":
+            span.set_attribute("db.response.returned_rows", len(outcome.rows))
+            span.set_attribute("mcp_backbone.result.truncated", outcome.is_truncated)
+        else:
+            mark_failed(span, outcome.status, outcome.error or "")
+    return outcome
+
+
+async def _run_with_retry(
+    conn: AsyncConnection, normalized_sql: str, cost: float
+) -> tuple[QueryOutcome, int]:
+    """Runs the query, up to MAX_ATTEMPTS times. Most queries succeed on
+    the first try; a retry happens only when the database CONNECTION
+    itself dropped (see TRANSIENT_EXCEPTIONS above). Returns the outcome
+    and how many attempts it took."""
+    attempt = 1
+    while True:
+        try:
+            rows, is_truncated = await _fetch_capped(conn, normalized_sql)
+        except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
+            cause = _asyncpg_cause(exc)
+            if isinstance(cause, asyncpg.exceptions.QueryCanceledError):
+                # The statement timeout kicked in. Never retried: the query
+                # was just too slow, and trying again would be slow again.
+                return QueryOutcome(
+                    status="timed_out", error="statement timeout exceeded", cost=cost
+                ), attempt
+            if isinstance(cause, TRANSIENT_EXCEPTIONS) and attempt < MAX_ATTEMPTS:
+                # The connection broke, not the query: pause, then try again.
+                attempt += 1
+                await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+                continue
+            return QueryOutcome(status="errored", error=str(exc), cost=cost), attempt
+        succeeded = QueryOutcome(
+            status="succeeded", cost=cost, rows=rows, is_truncated=is_truncated
+        )
+        return succeeded, attempt
+
+
+async def _fetch_capped(
+    conn: AsyncConnection, normalized_sql: str
+) -> tuple[list[dict[str, Any]], bool]:
+    """Streams the result through a server-side cursor and cuts it off at
+    the cap: the cost check limits how expensive a query is, not how big
+    its result is, and a cheap "select * from rental" is 16,000 rows --
+    far too many to hand an AI model. One extra row is fetched only to
+    tell "exactly at the cap" from "cut off". Returns the rows and
+    whether they were cut off."""
+    result = await conn.stream(text(normalized_sql))
+    fetched = await result.fetchmany(settings.max_result_rows + 1)
+    await result.close()
+    rows = [
+        dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
+        for row in fetched[: settings.max_result_rows]
+    ]
+    return rows, len(fetched) > settings.max_result_rows
+
+
+async def _finish(
+    session: AsyncSession, data_source: DataSourceConnection, sql: str, outcome: QueryOutcome
+) -> dict[str, Any]:
+    """Step 5: whatever happened, write it to the audit log before telling
+    the caller the result."""
+    await write_audit(session, data_source, sql, outcome)
+    response: dict[str, Any] = {
+        "status": outcome.status,
+        "rows": outcome.rows,
+        "error": outcome.error,
+    }
+    if outcome.is_truncated:
         response["truncated"] = True
         response["note"] = (
             f"Only the first {settings.max_result_rows} rows are returned. "

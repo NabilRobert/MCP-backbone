@@ -19,6 +19,7 @@ from app.db import get_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
 from app.query.service import (
     QueryExecutionError,
+    QueryOutcome,
     get_data_source,
     visible_table_names,
     write_audit,
@@ -27,6 +28,14 @@ from app.query.service import (
 # How long a saved copy of the schema stays "fresh" before we bother
 # asking the real database again.
 CACHE_TTL_SECONDS = 300
+# The most rows sample_rows returns, whatever the caller asks for.
+MAX_SAMPLE_ROWS = 100
+
+
+def sample_rows_audit_text(table_name: str, limit: int) -> str:
+    """How a sample_rows call reads in the audit log: as the query it
+    stands for. Shared with app/mcp/server.py, which audits a refused call."""
+    return f'SELECT * FROM "{table_name}" LIMIT {limit}'
 
 
 async def _fetch_live(connection_url: str) -> dict[str, list[dict[str, str]]]:
@@ -114,8 +123,8 @@ async def sample_rows(
     data_source = await get_data_source(session, workspace)
 
     # Keep the sample small, no matter what was asked for.
-    safe_limit = max(1, min(int(limit), 100))
-    audit_sql = f'SELECT * FROM "{table_name}" LIMIT {safe_limit}'
+    safe_limit = max(1, min(int(limit), MAX_SAMPLE_ROWS))
+    audit_sql = sample_rows_audit_text(table_name, safe_limit)
 
     try:
         await check_and_increment(
@@ -126,13 +135,16 @@ async def sample_rows(
             bucket="sample",
         )
     except RateLimitExceeded as exc:
-        await write_audit(session, workspace, data_source, audit_sql, "rejected", None, exc.reason)
+        refusal = QueryOutcome(status="rejected", error=exc.reason)
+        await write_audit(session, data_source, audit_sql, refusal)
         raise QueryExecutionError(f"sample_rows {exc.reason}") from exc
 
     metadata = await get_table_metadata(session, workspace, data_source)
     if table_name not in metadata:
         reason = f"table '{table_name}' not found"
-        await write_audit(session, workspace, data_source, audit_sql, "rejected", None, reason)
+        await write_audit(
+            session, data_source, audit_sql, QueryOutcome(status="rejected", error=reason)
+        )
         raise QueryExecutionError(reason)
 
     # A technical note on why this is safe to build as a plain string
@@ -154,8 +166,10 @@ async def sample_rows(
                 for row in result
             ]
     except Exception as exc:  # recorded, then re-raised as a clean tool error
-        await write_audit(session, workspace, data_source, audit_sql, "errored", None, str(exc))
+        await write_audit(
+            session, data_source, audit_sql, QueryOutcome(status="errored", error=str(exc))
+        )
         raise QueryExecutionError(f"sample_rows failed: {exc}") from exc
 
-    await write_audit(session, workspace, data_source, audit_sql, "succeeded", None, None)
+    await write_audit(session, data_source, audit_sql, QueryOutcome(status="succeeded"))
     return rows

@@ -16,21 +16,32 @@ import re
 import secrets
 from dataclasses import dataclass, field
 
+from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.models import ApiKey, ConsoleCredential, InviteCode, Workspace
-from app.auth.security import generate_api_key, hash_api_key, hash_password
+from app.auth.models import InviteCode, Workspace
+from app.auth.security import hash_api_key
+from app.auth.workspaces import UsernameTaken, WorkspaceSpec, create_workspace
 from app.config import settings
 from app.console import throttle
 from app.db import create_target_engine
-from app.query.models import DataSourceConnection
 from app.query.network_guard import UnsafeTargetError, ensure_public_target
 
 MIN_PASSWORD_LENGTH = 12
 CONNECT_TIMEOUT_SECONDS = 10
 _USERNAME = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+
+
+class SignupForm(BaseModel):
+    """What the console's signup form sends (app/console/routes.py reads
+    it straight from the form fields). Blank invite code: a demo account."""
+
+    username: str
+    password: str
+    invite_code: str = ""
+    connection_url: str = ""
 
 
 class SignupError(Exception):
@@ -114,62 +125,11 @@ async def _check_target(connection_url: str) -> list[str]:
     return []
 
 
-async def _create_workspace(
-    session: AsyncSession,
-    username: str,
-    password: str,
-    connection_url: str | None,
-    created_via: str,
-    now: datetime.datetime,
-) -> tuple[Workspace, str]:
-    """Adds a workspace with its database, console login and first API
-    key to the current transaction (the caller commits). Returns the
-    workspace and the API key in plain text."""
-    taken = await session.execute(
-        select(ConsoleCredential.id).where(ConsoleCredential.username == username)
-    )
-    if taken.first() is not None:
-        raise SignupError("That username is taken.")
-
-    workspace = Workspace(name=username, created_at=now, created_via=created_via)
-    session.add(workspace)
-    await session.flush()
-
-    # None = the server's default database, resolved from settings on
-    # every use (see DataSourceConnection), never copied in here.
-    if connection_url is None:
-        session.add(DataSourceConnection(workspace_id=workspace.id, encrypted_connection_url=None))
-    else:
-        session.add(DataSourceConnection(workspace_id=workspace.id, connection_url=connection_url))
-    session.add(
-        ConsoleCredential(
-            workspace_id=workspace.id,
-            username=username,
-            password_hash=hash_password(password),
-        )
-    )
-    api_key = generate_api_key()
-    session.add(
-        ApiKey(
-            workspace_id=workspace.id,
-            key_hash=hash_api_key(api_key),
-            status="active",
-            created_at=now,
-        )
-    )
-    return workspace, api_key
-
-
-async def _sign_up_demo(
-    session: AsyncSession, username: str, password: str, client_ip: str, now: datetime.datetime
-) -> SignupResult:
-    """No invite code: a demo account on the server's default database.
-    Open to anyone, because the risky part of signup -- making this
-    server connect to a host the user picked, and storing their database
-    password -- isn't available here. What's left to guard against is
-    someone mass-creating accounts to multiply the per-workspace rate
-    limits, so demo signups are capped per client IP and in total, per
-    day."""
+async def _check_demo_capacity(
+    session: AsyncSession, client_ip: str, now: datetime.datetime
+) -> None:
+    """Raises SignupError if demo signups are off, or this network or the
+    whole server has used up today's demo accounts."""
     if not settings.demo_signups_enabled:
         raise SignupError("Signup currently needs an invite code.")
     if await throttle.is_blocked(
@@ -193,12 +153,22 @@ async def _sign_up_demo(
             "The demo is full for today. Try again tomorrow, or ask for an invite code."
         )
 
+
+async def _sign_up_demo(
+    session: AsyncSession, spec: WorkspaceSpec, client_ip: str, now: datetime.datetime
+) -> SignupResult:
+    """No invite code: a demo account on the server's default database.
+    Open to anyone, because the risky part of signup -- making this
+    server connect to a host the user picked, and storing their database
+    password -- isn't available here. What's left to guard against is
+    someone mass-creating accounts to multiply the per-workspace rate
+    limits, so demo signups are capped per client IP and in total, per
+    day."""
+    await _check_demo_capacity(session, client_ip, now)
     try:
-        workspace, api_key = await _create_workspace(
-            session, username, password, None, "demo", now
-        )
+        workspace, api_key = await create_workspace(session, spec, now)
         await session.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, UsernameTaken) as exc:
         await session.rollback()
         raise SignupError("That username is taken.") from exc
     except BaseException:
@@ -209,40 +179,15 @@ async def _sign_up_demo(
     return SignupResult(workspace=workspace, api_key=api_key)
 
 
-async def sign_up(
-    session: AsyncSession,
-    invite_code: str,
-    username: str,
-    password: str,
-    connection_url: str | None,
-    client_ip: str = "unknown",
+async def _sign_up_invited(
+    session: AsyncSession, invite_code: str, spec: WorkspaceSpec, now: datetime.datetime
 ) -> SignupResult:
-    """Creates a workspace. Without an invite code, that's a demo
-    account on the default database (_sign_up_demo above). With one,
-    the user may also connect their own database.
-
-    Invite path: everything happens in one transaction, so if any step
-    fails nothing is created and the invite stays unused. The invite is
-    checked FIRST, before touching the user's connection URL --
-    otherwise anyone, invited or not, could make this server open
-    connections to hosts of their choosing."""
-    username = username.strip()
-    invite_code = invite_code.strip()
-    connection_url = (connection_url or "").strip()
-    if not _USERNAME.match(username):
-        raise SignupError("Username must be 3-32 letters, digits, '.', '_' or '-'.")
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise SignupError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
-
-    now = datetime.datetime.now(datetime.UTC)
-    if not invite_code:
-        if connection_url:
-            raise SignupError(
-                "Connecting your own database needs an invite code. "
-                "Leave the database field blank to use the demo database."
-            )
-        return await _sign_up_demo(session, username, password, client_ip, now)
-
+    """With an invite code, the user may also connect their own database.
+    Everything happens in one transaction, so if any step fails nothing
+    is created and the invite stays unused. The invite is checked FIRST,
+    before touching the user's connection URL -- otherwise anyone,
+    invited or not, could make this server open connections to hosts of
+    their choosing."""
     # Claims the invite atomically: the row lock taken by this UPDATE
     # holds until commit, so two simultaneous signups with the same code
     # can't both succeed -- the second one finds used_at already set.
@@ -262,24 +207,15 @@ async def sign_up(
         raise SignupError("That invite code is invalid, expired, or already used.")
 
     try:
-        warnings: list[str] = []
-        if connection_url:
-            warnings = await _check_target(connection_url)
-        workspace, api_key = await _create_workspace(
-            session,
-            username,
-            password,
-            connection_url or None,
-            "invite",
-            now,
-        )
+        warnings = await _check_target(spec.connection_url) if spec.connection_url else []
+        workspace, api_key = await create_workspace(session, spec, now)
         await session.execute(
             update(InviteCode)
             .where(InviteCode.id == invite_id)
             .values(used_by_workspace_id=workspace.id)
         )
         await session.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, UsernameTaken) as exc:
         # The username check can lose a race with a simultaneous signup;
         # the unique constraint is the real guarantee.
         await session.rollback()
@@ -289,3 +225,36 @@ async def sign_up(
         raise
 
     return SignupResult(workspace=workspace, api_key=api_key, warnings=warnings)
+
+
+async def sign_up(
+    session: AsyncSession, form: SignupForm, client_ip: str = "unknown"
+) -> SignupResult:
+    """Creates a workspace from the console's signup form. Without an
+    invite code, that's a demo account on the default database
+    (_sign_up_demo above). With one, the user may also connect their own
+    database (_sign_up_invited)."""
+    username = form.username.strip()
+    invite_code = form.invite_code.strip()
+    connection_url = form.connection_url.strip()
+    if not _USERNAME.match(username):
+        raise SignupError("Username must be 3-32 letters, digits, '.', '_' or '-'.")
+    if len(form.password) < MIN_PASSWORD_LENGTH:
+        raise SignupError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+
+    now = datetime.datetime.now(datetime.UTC)
+    spec = WorkspaceSpec(
+        name=username,
+        console_username=username,
+        console_password=form.password,
+        created_via="invite" if invite_code else "demo",
+        connection_url=connection_url or None,
+    )
+    if invite_code:
+        return await _sign_up_invited(session, invite_code, spec, now)
+    if connection_url:
+        raise SignupError(
+            "Connecting your own database needs an invite code. "
+            "Leave the database field blank to use the demo database."
+        )
+    return await _sign_up_demo(session, spec, client_ip, now)
