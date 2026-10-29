@@ -36,7 +36,11 @@ class _StrictSchemaServer(MCPServer):
         tools = await super().list_tools()
         for tool in tools:
             schema = tool.input_schema
-            tool.input_schema = {**schema, "required": schema.get("required", []), "additionalProperties": False}
+            tool.input_schema = {
+                **schema,
+                "required": schema.get("required", []),
+                "additionalProperties": False,
+            }
         return tools
 
 
@@ -124,7 +128,10 @@ async def sample_rows(ctx: Context, table_name: str, limit: int) -> list[dict[st
         except ToolNotPermitted as exc:
             # An attempt to read data, so it's audited even when refused.
             await query_service.record_refusal(
-                session, exc.workspace, f'SELECT * FROM "{table_name}" LIMIT {limit}', str(exc)
+                session,
+                exc.workspace,
+                schema_cache.sample_rows_audit_text(table_name, limit),
+                str(exc),
             )
             raise
         return await schema_cache.sample_rows(session, workspace, table_name, limit)
