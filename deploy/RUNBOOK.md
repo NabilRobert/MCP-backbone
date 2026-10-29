@@ -18,13 +18,26 @@ file referenced lives in `deploy/` unless stated otherwise.
 
 ## Routine operations
 
-**Deploy a change**
+**Deploy a change**, in this order:
 ```bash
-cd ~/MCP-backbone && git pull && uv pip install -q --python .venv/bin/python -e . \
-  && .venv/bin/alembic upgrade head && sudo systemctl restart mcp-backbone \
-  && systemctl is-active mcp-backbone && curl -s https://mcp.my.id/healthz
+cd ~/MCP-backbone
+git fetch
+git diff --stat HEAD origin/main -- migrations/   # any output: a migration is coming
+~/bin/backup_bookkeeping.sh                       # only if the line above printed anything
+git pull --ff-only
+uv sync --frozen                                  # dependencies exactly as in uv.lock
+.venv/bin/alembic upgrade head
+sudo systemctl restart mcp-backbone
+systemctl is-active mcp-backbone
+curl -sk https://localhost:8443/healthz           # its "version"...
+git rev-parse --short=12 HEAD                     # ...must match this
 ```
-Run `~/bin/backup_bookkeeping.sh` first when a migration rewrites data.
+Why this order: the service runs whatever is in `.venv`. Restarting after
+a pull but before `uv sync` starts the new code on the old dependencies,
+and if the new code imports a package that isn't installed yet, the
+service crash-loops until the sync runs. Migrating before the restart
+means the new code never meets an old schema. `--ff-only` refuses to
+make a merge commit on the server if its checkout has drifted.
 A restart logs a `CancelledError ... graceful shutdown` traceback from the
 *old* process: open MCP streams are cut after 5 seconds. That's expected.
 
@@ -74,9 +87,8 @@ with, or the stored connection URLs can't be decrypted.
    `certbot` + `python3-certbot-dns-cloudflare`.
 2. **Bookkeeping DB:** create a login and a database owned by it (loopback
    only, password auth).
-3. **App:** clone to `~/MCP-backbone`, `uv venv .venv`,
-   `uv pip install --python .venv/bin/python -e .` (a uv venv has no
-   `pip`), copy `.env.example` → `.env` (mode 600)
+3. **App:** clone to `~/MCP-backbone`, `uv sync --frozen` (creates `.venv`
+   from `uv.lock`), copy `.env.example` → `.env` (mode 600)
    and fill it in. Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
    off-server copy if restoring data. Then `.venv/bin/alembic upgrade head`.
 4. **TLS for 8443:** `certbot certonly --dns-cloudflare
