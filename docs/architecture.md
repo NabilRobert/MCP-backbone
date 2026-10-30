@@ -59,10 +59,14 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    function (`_check_rate_limit`, `_validate`, `_estimate_cost`,
    `_execute`), and `run_query` just calls them in order; every step
    returns a `QueryOutcome` when it ends the request, and `_finish`
-   audits it. `get_data_source` here is a small
-   shared helper (used by several files) that looks up which real
-   external database a workspace is allowed to query, and re-runs the
-   address guard (`app/query/network_guard.py`) on it every time.
+   audits it.
+
+   **`app/query/target.py`** is how every tool reaches a target database.
+   `get_data_source` looks up which one a workspace may query and re-runs
+   the address guard (`app/query/network_guard.py`) on it every time;
+   `connect_to_target` opens a connection, and `caller_safe_error` decides
+   what a failure may say, so a driver's error text can't reach a caller
+   with the host in it.
 
 6. **`app/query/schema_cache.py`** — `describe_table` and `sample_rows`
    live here. They answer "what columns does this table have?" and

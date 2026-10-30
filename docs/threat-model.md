@@ -169,7 +169,7 @@ any loopback, private, link-local (incl. cloud metadata), carrier-grade
 NAT or reserved address, including IPv4 hidden inside IPv6
 (`::ffff:127.0.0.1`). It also refuses URL parameters that could add a
 second host (`?host=`) or read local files (`?passfile=`). It runs at
-signup and again on every use (`get_data_source`), so a DNS change after
+signup and again on every use (`ensure_target_allowed`), so a DNS change after
 registration is caught too. The one exemption is the server's own default
 database (`APP_TARGET_DATABASE_URL`): it's set by the operator, not a
 user, and may legitimately live on localhost. Workspaces on the default
