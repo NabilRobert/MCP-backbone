@@ -42,14 +42,17 @@ sequenceDiagram
 
 1. **The request arrives.** `app/main.py: mcp_app` is the MCP SDK's HTTP
    app, mounted at `/mcp`. It checks the `Host` and `Origin` headers
-   (`app/main.py: transport_security_for`) and hands the call to the
-   tool. If tracing is on, the SDK opens a span for the call.
+   against the list `app/main.py: transport_security_for` builds, then
+   hands the call to the tool. If tracing is on, the SDK opens a span for
+   the call, and each step below adds a child span
+   (`app/tracing.py: stage`).
 2. **The tool function runs.** `app/mcp/server.py: run_query` opens a
    session on the bookkeeping database (`app/db.py: SessionLocal`). It's
    wrapped by `app/mcp/server.py: _translate_errors`, which turns our own
    errors into a clean message the model can read.
-3. **Who is asking?** `app/mcp/server.py: _resolve_api_key` reads the key
-   from the `Authorization: Bearer` header. Then
+3. **Who is asking?** `app/mcp/server.py: _authenticate` calls
+   `app/mcp/server.py: _resolve_api_key`, which reads the key from the
+   `Authorization: Bearer` header. Then
    `app/auth/service.py: authenticate` hashes it
    (`app/auth/security.py: hash_api_key`), finds the active key row, and
    returns its `Workspace`. If the key's scopes don't include
@@ -59,34 +62,51 @@ sequenceDiagram
    workspace's target database. A user's own URL is decrypted
    (`app/crypto.py: decrypt`) and checked again for private addresses
    (`app/query/network_guard.py: ensure_public_target`), because DNS can
-   change after signup.
+   change after signup. The server's default database skips that check:
+   the operator chose it, and it may be on localhost.
 5. **Rate limit.** `app/query/service.py: _check_rate_limit` calls
    `app/auth/rate_limit.py: check_and_increment`: at most 5 queries per
-   workspace per hour by default. Over the limit, the request ends here
-   as `rejected`.
+   workspace per hour by default. It counts before the SQL is checked,
+   so a query refused later still uses one up. Over the limit, the
+   request ends here as `rejected`.
 6. **Is the SQL safe?** `app/query/service.py: _validate` calls
    `app/query/validation.py: validate_and_normalize`. It parses the SQL
    with sqlglot and requires exactly one `SELECT`, with no write hidden
-   anywhere inside it and no unknown functions. It adds `LIMIT 1000` if
-   there's no limit. Nothing has touched the target database yet.
-7. **Is it too expensive?** `app/query/service.py: _estimate_cost` calls
+   anywhere inside it and no unknown functions. A top-level `UNION` is
+   refused too, though one inside a sub-query passes. It adds
+   `LIMIT 1000` if there's no limit. Nothing has touched the target
+   database yet.
+7. **Is it too expensive?** `app/query/service.py: run_query` opens one
+   connection to the target (`app/db.py: get_target_engine`). Every
+   transaction on it is `READ ONLY`, and steps 7 and 8 share one
+   transaction. `app/query/service.py: _estimate_cost` calls
    `app/query/cost_check.py: check_cost`, which asks Postgres for the
-   plan's cost with `EXPLAIN`, without running the query. Over 40,000,
-   it's rejected.
+   plan's cost with `EXPLAIN`, without running the query, under a
+   2-second timeout. Over 40,000, it's rejected.
 8. **Run it.** `app/query/service.py: _execute` sets a 5-second statement
    timeout and calls `app/query/service.py: _run_with_retry`. That
    retries once if the connection dropped, but never if the query was
    just slow. `app/query/service.py: _fetch_capped` reads at most 200
-   rows. The connection comes from `app/db.py: get_target_engine`, and
-   every transaction on it is `READ ONLY`.
+   rows.
 9. **Audit, then answer.** `app/query/service.py: _finish` calls
    `app/query/service.py: write_audit`, which saves one `QueryExecution`
    row (the audit log), and only then returns the result. If the audit
    write fails, the caller gets an error, not the rows.
 
-Every step that can end the request returns a `QueryOutcome`
+Steps 5 to 8 end a request by returning a `QueryOutcome`
 (`app/query/service.py: QueryOutcome`), and `_finish` audits it. So a
 refused query is logged exactly like a successful one.
+
+Three known gaps, all reported as bugs:
+
+- If step 4 fails (no data source, or an address that's now private), it
+  raises an error and nothing is audited.
+- If the target can't be reached when step 7 opens the connection, the
+  error escapes `run_query` and nothing is audited.
+- The retry in step 8 can't succeed yet. It reuses the broken connection,
+  so the second try fails and the query ends as `errored`. What does
+  protect you is `pool_pre_ping` (`app/db.py: create_target_engine`),
+  which replaces a dead connection before a query starts.
 
 ### The other three tools
 
@@ -137,7 +157,7 @@ Both end in `app/auth/workspaces.py: create_workspace`.
 
 ### An admin script: issuing an invite
 
-`python -m scripts.create_invite --note "alice"` →
+`uv run python -m scripts.create_invite --note "alice"` →
 `scripts/create_invite.py: main` → `scripts/create_invite.py: issue` →
 `app/auth/signup.py: create_invite`. It stores only a hash of the code
 and prints the code once. The other scripts work the same way:
@@ -171,23 +191,26 @@ and prints the code once. The other scripts work the same way:
 | `READ ONLY` transaction | Postgres refuses every write in it, even from a `SECURITY DEFINER` function. | `app/db.py: create_target_engine` |
 | Read-only role | A database login that can only `SELECT`. A second guard behind the transaction. | `scripts/provision_readonly_role.py` |
 | Row cap | At most 200 rows go back to the model; more are cut off with a note. | `app/query/service.py: _fetch_capped` |
-| Rate limit | At most N calls per workspace per hour. A fixed window, counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
-| Audit log | One `QueryExecution` row per attempt, refused or not. The console shows it. | `app/query/service.py: write_audit` |
+| Rate limit | At most N calls per workspace per hour. A fixed window: the count resets when the hour is up. Counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
+| Audit log | One `QueryExecution` row per attempt, refused or not (see the known gaps above). The console shows it. | `app/query/service.py: write_audit` |
 | `QueryOutcome` | How one attempt ended: status, reason, cost, rows. | `app/query/service.py: QueryOutcome` |
 | Schema cache | A 5-minute copy of table and column names, for the browsing tools only. | `app/query/schema_cache.py: get_table_metadata` |
 | Network guard | Refuses a database URL that points at a private or local address (SSRF protection). | `app/query/network_guard.py: ensure_public_target` |
 | SSRF | Tricking a server into connecting somewhere it shouldn't, like its own internal database. | `app/query/network_guard.py` |
+| DNS rebinding | Changing where a hostname points after it was checked. The `Host` check stops browsers doing it to `/mcp`; the network guard re-checks target URLs on every use, with one gap its docstring states. | `app/main.py: transport_security_for`, `app/query/network_guard.py` |
+| Connection pool | A few open connections kept for reuse, instead of a new one per call. `pool_pre_ping` tests one before handing it out. | `app/db.py: get_target_engine` |
+| PgBouncer | A connection pooler that can sit in front of Postgres. It's why prepared-statement caching is turned off. | `app/db.py: create_target_engine` |
 | Fernet | Symmetric encryption from the `cryptography` library. Encrypts stored database URLs. | `app/crypto.py: encrypt` |
 | Argon2 | A slow, memory-hard password hash. Older scrypt hashes are upgraded at login. | `app/auth/security.py: hash_password` |
 | CSRF | A trick where another site makes your browser submit a form. Every console form carries a token to stop it. | `app/console/csrf.py: verify_csrf` |
 | Session cookie | The signed cookie that remembers a console login. | `app/main.py`, `app/console/auth.py: log_in` |
-| Throttle | Per-IP limits on failed logins and demo signups. | `app/console/throttle.py: is_blocked` |
+| Throttle | Per-IP limits on failed logins, failed signups and demo signups. | `app/console/throttle.py: is_blocked` |
 | Invite code | A single-use code that lets someone connect their own database at signup. | `app/auth/signup.py: create_invite` |
 | Alembic migration | A versioned script that changes the bookkeeping database's tables. | `migrations/versions/` |
 | Span, trace | OpenTelemetry's record of one timed step (span) and a whole request (trace). Off unless an endpoint is set. | `app/tracing.py: stage` |
 | Build version | The running git commit, shown by `/healthz`. | `app/version.py: BUILD_VERSION` |
 | Benchmark | 30 questions asked through the real tools, graded on the rows returned. | `scripts/run_benchmark.py: run`, `app/benchmark/grading.py` |
-| Red-team suite | Tests that try to write through the database layers directly, skipping the validator. | `tests/test_red_team.py` |
+| Red-team suite | Attacks on the safety layers. Some go through the real `run_query`; others skip the validator to prove the database refuses on its own. | `tests/test_red_team.py` |
 | Plugin | The Claude Code plugin: registers the server and a skill telling Claude how to use it. | `plugin/` |
 
 ## Where to change things
@@ -200,8 +223,10 @@ and prints the code once. The other scripts work the same way:
   `.env.example`, and the defaults live in `app/config.py: Settings`.
   Row cap: `APP_MAX_RESULT_ROWS`. Timeouts: `APP_QUERY_TIMEOUT_SECONDS`,
   `APP_EXPLAIN_TIMEOUT_SECONDS`. Cost: `APP_COST_THRESHOLD`. Rate limits:
-  `APP_DEMO_RATE_LIMIT` and `APP_SAMPLE_RATE_LIMIT`; for one workspace
-  only, `scripts/seed_workspace.py --query-rate-limit`.
+  `APP_DEMO_RATE_LIMIT` and `APP_SAMPLE_RATE_LIMIT`, over a window of
+  `APP_DEMO_RATE_LIMIT_WINDOW_SECONDS` (this one isn't in
+  `.env.example`). For one workspace only, `scripts/seed_workspace.py`
+  takes `--query-rate-limit` and `--sample-rate-limit`.
 - **Allow a SQL function:** add its lower-case name to
   `ALLOWED_ANONYMOUS_FUNCTIONS` in `app/query/validation.py`, only after
   checking it can't write. Add a test in `tests/test_validation.py`.
