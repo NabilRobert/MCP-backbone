@@ -24,7 +24,8 @@ from app.auth.models import ApiKey, ConsoleCredential, Workspace
 from app.auth.security import generate_api_key, hash_api_key, hash_password
 from app.config import settings
 from app.query.models import DataSourceConnection
-from app.query.service import get_data_source, run_query
+from app.query.service import run_query
+from app.query.target import get_data_source
 
 pytestmark = pytest.mark.asyncio
 

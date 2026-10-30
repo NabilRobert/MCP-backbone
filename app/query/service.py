@@ -12,73 +12,31 @@ from typing import Any
 import asyncpg  # pyright: ignore[reportMissingTypeStubs] -- asyncpg ships no stubs
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
-from app.db import get_target_engine
 from app.query.cost_check import check_cost
 from app.query.models import DataSourceConnection, QueryExecution
-from app.query.network_guard import UnsafeTargetError, ensure_public_target
+from app.query.target import (
+    QueryExecutionError,
+    TargetUnreachable,
+    asyncpg_cause,
+    caller_safe_error,
+    connect_to_target,
+    ensure_target_allowed,
+    find_data_source,
+    get_data_source,
+    is_connection_failure,
+)
 from app.query.validation import QueryRejected, validate_and_normalize
 from app.tracing import DB_ATTRIBUTES, mark_failed, stage
 
-# If a query fails because the DATABASE CONNECTION itself dropped (a
-# network blip, the database restarting, etc.), that's worth retrying --
-# it's not the query's fault. These are the specific error types that
-# count as "the connection broke," not "the query was bad."
-#
-# A query that times out for being slow/expensive is a completely
-# different situation and is NEVER retried below -- retrying something
-# slow just makes the database do the same expensive work twice.
-TRANSIENT_EXCEPTIONS = (
-    asyncpg.exceptions.ConnectionDoesNotExistError,
-    asyncpg.exceptions.ConnectionFailureError,
-    asyncpg.exceptions.InterfaceError,
-    OSError,
-)
 MAX_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 0.5
-
-
-class QueryExecutionError(Exception):
-    """Raised for problems that aren't about SQL safety (that's
-    QueryRejected, in validation.py) -- things like "this workspace
-    isn't even set up to query anything yet.\""""
-
-
-def _asyncpg_cause(exc: BaseException) -> BaseException | None:
-    """A small helper for digging out the real, specific database error
-    from underneath the generic wrapper exception that SQLAlchemy raises.
-    Needed so the code below can tell "the connection dropped" apart from
-    "the query timed out" apart from "something else entirely broke.\""""
-    orig = getattr(exc, "orig", None)
-    return getattr(orig, "__cause__", None)
-
-
-async def get_data_source(session: AsyncSession, workspace: Workspace) -> DataSourceConnection:
-    """Looks up which real, outside database this workspace is allowed
-    to query. Used by every function in this file (and in
-    schema_cache.py) that needs to actually connect somewhere."""
-    result = await session.execute(
-        select(DataSourceConnection).where(DataSourceConnection.workspace_id == workspace.id)
-    )
-    data_source = result.scalar_one_or_none()
-    if data_source is None:
-        raise QueryExecutionError("workspace has no data source connection configured")
-    # Re-checked on every use, not just at registration: the host's DNS
-    # could have been changed since to point somewhere private. The
-    # server's own default database is the operator's choice, not a
-    # user's, so it's exempt (it may legitimately be on localhost).
-    if not data_source.uses_default_target:
-        try:
-            await ensure_public_target(data_source.connection_url)
-        except UnsafeTargetError as exc:
-            raise QueryExecutionError(str(exc)) from exc
-    return data_source
 
 
 @dataclass(frozen=True)
@@ -138,7 +96,7 @@ async def record_refusal(
     by the key's scopes), so the log still shows every attempt. Skipped
     only if the workspace has no data source to attribute it to."""
     try:
-        data_source = await get_data_source(session, workspace)
+        data_source = await find_data_source(session, workspace)
     except QueryExecutionError:
         return
     await write_audit(session, data_source, sql, QueryOutcome(status="rejected", error=reason))
@@ -168,7 +126,7 @@ async def list_tables(session: AsyncSession, workspace: Workspace) -> list[str]:
     """Connects to the workspace's real database just long enough to ask
     "what tables exist here?" and returns their names."""
     data_source = await get_data_source(session, workspace)
-    async with get_target_engine(data_source.connection_url).connect() as conn:
+    async with connect_to_target(data_source.connection_url) as conn:
         return await conn.run_sync(visible_table_names)
 
 
@@ -186,7 +144,12 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     execute, then audit. A step that ends the request returns the
     outcome, and the audit is written outside the steps' spans, so it
     shows as their sibling."""
-    data_source = await get_data_source(session, workspace)
+    data_source = await find_data_source(session, workspace)
+    try:
+        await ensure_target_allowed(data_source)
+    except QueryExecutionError as exc:
+        refusal = QueryOutcome(status="rejected", error=str(exc))
+        return await _finish(session, data_source, sql, refusal)
 
     refusal = await _check_rate_limit(session, workspace)
     if refusal is not None:
@@ -196,12 +159,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     if isinstance(validated, QueryOutcome):
         return await _finish(session, data_source, sql, validated)
 
-    async with get_target_engine(data_source.connection_url).connect() as conn:
-        cost = await _estimate_cost(conn, validated)
-        if isinstance(cost, QueryOutcome):
-            return await _finish(session, data_source, sql, cost)
-        outcome = await _execute(conn, validated, cost)
-
+    outcome = await _query_target(data_source.connection_url, validated)
     return await _finish(session, data_source, sql, outcome)
 
 
@@ -235,6 +193,19 @@ def _validate(sql: str) -> str | QueryOutcome:
             return QueryOutcome(status="rejected", error=exc.reason)
 
 
+async def _query_target(connection_url: str, normalized_sql: str) -> QueryOutcome:
+    """Steps 3 and 4. Each gets its own connection and transaction, so a
+    retry of step 4 starts from the same state as its first try."""
+    try:
+        async with connect_to_target(connection_url) as conn:
+            cost = await _estimate_cost(conn, normalized_sql)
+    except TargetUnreachable as exc:
+        return QueryOutcome(status="errored", error=str(exc))
+    if isinstance(cost, QueryOutcome):
+        return cost
+    return await _execute(connection_url, normalized_sql, cost)
+
+
 async def _estimate_cost(conn: AsyncConnection, normalized_sql: str) -> float | QueryOutcome:
     """Step 3: how expensive would this query be? (see
     app/query/cost_check.py.) Returns the estimate, or the outcome that
@@ -258,15 +229,13 @@ async def _estimate_cost(conn: AsyncConnection, normalized_sql: str) -> float | 
             return QueryOutcome(status="rejected", error=exc.reason)
         except Exception as exc:  # noqa: BLE001 -- e.g. EXPLAIN on a table that doesn't exist
             mark_failed(span, type(exc).__qualname__, str(exc))
-            return QueryOutcome(status="errored", error=str(exc))
+            return QueryOutcome(status="errored", error=caller_safe_error(exc))
         span.set_attribute("mcp_backbone.cost.estimate", cost)
         return cost
 
 
-async def _execute(conn: AsyncConnection, normalized_sql: str, cost: float) -> QueryOutcome:
-    """Step 4: actually run the query, with a safety net -- if it takes
-    longer than the timeout, Postgres kills it itself rather than
-    letting it run forever."""
+async def _execute(connection_url: str, normalized_sql: str, cost: float) -> QueryOutcome:
+    """Step 4: actually run the query, and record how that went."""
     with stage(
         "execute",
         kind=SpanKind.CLIENT,
@@ -274,11 +243,8 @@ async def _execute(conn: AsyncConnection, normalized_sql: str, cost: float) -> Q
     ) as span:
         if settings.otel_capture_content:
             span.set_attribute("db.query.text", normalized_sql)
-        await conn.execute(
-            text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
-        )
 
-        outcome, attempts = await _run_with_retry(conn, normalized_sql, cost)
+        outcome, attempts = await _run_with_retry(connection_url, normalized_sql, cost)
 
         span.set_attribute("mcp_backbone.execute.attempts", attempts)
         if outcome.status == "succeeded":
@@ -290,30 +256,37 @@ async def _execute(conn: AsyncConnection, normalized_sql: str, cost: float) -> Q
 
 
 async def _run_with_retry(
-    conn: AsyncConnection, normalized_sql: str, cost: float
+    connection_url: str, normalized_sql: str, cost: float
 ) -> tuple[QueryOutcome, int]:
     """Runs the query, up to MAX_ATTEMPTS times. Most queries succeed on
     the first try; a retry happens only when the database CONNECTION
-    itself dropped (see TRANSIENT_EXCEPTIONS above). Returns the outcome
+    itself dropped (see TRANSIENT_EXCEPTIONS above), and always on a new
+    connection, since a broken one can't be reused. Returns the outcome
     and how many attempts it took."""
     attempt = 1
     while True:
         try:
-            rows, is_truncated = await _fetch_capped(conn, normalized_sql)
+            async with connect_to_target(connection_url) as conn:
+                # The safety net: Postgres kills a query that runs too long.
+                # SET LOCAL dies with its transaction, so each attempt sets it.
+                await conn.execute(
+                    text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
+                )
+                rows, is_truncated = await _fetch_capped(conn, normalized_sql)
         except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
-            cause = _asyncpg_cause(exc)
-            if isinstance(cause, asyncpg.exceptions.QueryCanceledError):
+            if isinstance(asyncpg_cause(exc), asyncpg.exceptions.QueryCanceledError):
                 # The statement timeout kicked in. Never retried: the query
                 # was just too slow, and trying again would be slow again.
-                return QueryOutcome(
+                timed_out = QueryOutcome(
                     status="timed_out", error="statement timeout exceeded", cost=cost
-                ), attempt
-            if isinstance(cause, TRANSIENT_EXCEPTIONS) and attempt < MAX_ATTEMPTS:
+                )
+                return timed_out, attempt
+            if is_connection_failure(exc) and attempt < MAX_ATTEMPTS:
                 # The connection broke, not the query: pause, then try again.
                 attempt += 1
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS)
                 continue
-            return QueryOutcome(status="errored", error=str(exc), cost=cost), attempt
+            return QueryOutcome(status="errored", error=caller_safe_error(exc), cost=cost), attempt
         succeeded = QueryOutcome(
             status="succeeded", cost=cost, rows=rows, is_truncated=is_truncated
         )

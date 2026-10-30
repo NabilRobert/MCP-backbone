@@ -118,10 +118,11 @@ async def test_guard_is_rechecked_on_every_use(
     workspace, _ = seeded_workspace
     monkeypatch.setattr(settings, "allow_private_targets", False)
 
-    with pytest.raises(QueryExecutionError, match="private or reserved"):
+    with pytest.raises(QueryExecutionError, match="no longer allowed"):
         await list_tables(db_session, workspace)
-    with pytest.raises(QueryExecutionError, match="private or reserved"):
-        await run_query(db_session, workspace, "select 1")
+    response = await run_query(db_session, workspace, "select 1")
+    assert response["status"] == "rejected"
+    assert "no longer allowed" in response["error"]
 
 
 # --- sample_rows: audited and rate-limited ----------------------------------

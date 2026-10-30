@@ -9,7 +9,8 @@ from app.auth.service import AuthenticationError, authenticate
 from app.config import settings
 from app.query.models import DataSourceConnection
 from app.query.schema_cache import sample_rows
-from app.query.service import QueryExecutionError, get_data_source, run_query
+from app.query.service import run_query
+from app.query.target import QueryExecutionError, get_data_source
 
 pytestmark = pytest.mark.asyncio
 
