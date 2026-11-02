@@ -16,7 +16,12 @@ from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
 from app.query.models import DataSourceConnection, SchemaCache
-from app.query.service import QueryOutcome, visible_table_names, write_audit
+from app.query.service import (
+    QueryOutcome,
+    target_failure_outcome,
+    visible_table_names,
+    write_audit,
+)
 from app.query.target import (
     QueryExecutionError,
     caller_safe_error,
@@ -118,8 +123,7 @@ async def _check_sample_allowed(
     try:
         await ensure_target_allowed(data_source)
     except QueryExecutionError as exc:
-        refusal = QueryOutcome(status="rejected", error=str(exc))
-        await write_audit(session, data_source, audit_sql, refusal)
+        await write_audit(session, data_source, audit_sql, target_failure_outcome(exc))
         raise
 
     try:

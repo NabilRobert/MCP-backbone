@@ -52,6 +52,13 @@ class QueryOutcome:
     is_truncated: bool = False
 
 
+def target_failure_outcome(exc: QueryExecutionError) -> QueryOutcome:
+    """A target that can't be used: errored if it's broken (a URL that no
+    longer decrypts, say), rejected if the address is refused."""
+    status = "errored" if isinstance(exc, TargetUnreachable) else "rejected"
+    return QueryOutcome(status=status, error=str(exc))
+
+
 async def write_audit(
     session: AsyncSession, data_source: DataSourceConnection, sql: str, outcome: QueryOutcome
 ) -> None:
@@ -148,8 +155,7 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     try:
         await ensure_target_allowed(data_source)
     except QueryExecutionError as exc:
-        refusal = QueryOutcome(status="rejected", error=str(exc))
-        return await _finish(session, data_source, sql, refusal)
+        return await _finish(session, data_source, sql, target_failure_outcome(exc))
 
     refusal = await _check_rate_limit(session, workspace)
     if refusal is not None:

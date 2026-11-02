@@ -192,6 +192,10 @@ setting things up:
 - **`seed_workspace.py`** — create a new workspace + its first API key
   directly, without an invite.
 - **`revoke_key.py`** — kill an existing API key.
+- **`remove_connection.py`** — forget a workspace's stored database URL,
+  or remove the whole workspace. Shows what it would do unless given
+  `--apply`, and never reads the URL, so it works on one that no longer
+  decrypts.
 - **`provision_readonly_role.py`** — set up the actual restricted
   database user on the *target* database (the one being queried),
   separately from the app's own bookkeeping database.

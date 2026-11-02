@@ -56,6 +56,19 @@ Without the flags a workspace keeps the server defaults. To change one later:
 **Revoke access:** a workspace's own console (Keys page: revoke the key, or
 log out everywhere), or `scripts/revoke_key.py`.
 
+**Remove a stored connection** (for example one that no longer decrypts after
+the encryption key changed). There's no console button for this. Back up
+first, then run this to see what it would do, and add `--apply` to do it:
+```bash
+~/bin/backup_bookkeeping.sh
+.venv/bin/python -m scripts.remove_connection --workspace-name <name> --remove-workspace
+```
+`--remove-workspace` deletes the workspace and its audit log.
+`--use-default-database` instead keeps both and only forgets the URL, but the
+workspace then queries the default database, so it isn't cut off. The script
+never reads or prints the URL. Way back: `scripts/seed_workspace.py` makes a
+new workspace, and the old rows only return from a backup (see Restore below).
+
 **Logs:** `journalctl -u mcp-backbone -f` (app), `docker logs tamara-site`
 (Caddy), `~/backups/backup.log` (backups).
 

@@ -161,7 +161,9 @@ Both end in `app/auth/workspaces.py: create_workspace`.
 and prints the code once. The other scripts work the same way:
 `scripts/seed_workspace.py: seed` creates a workspace without an invite
 (and is the only way to give one its own rate limits), and
-`scripts/revoke_key.py: revoke` revokes a key.
+`scripts/revoke_key.py: revoke` revokes a key, and
+`scripts/remove_connection.py: clean_up` removes a stored database URL
+or a whole workspace, changing nothing without `--apply`.
 
 ## Glossary
 
