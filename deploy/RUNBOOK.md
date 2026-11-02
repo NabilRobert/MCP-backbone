@@ -1,7 +1,7 @@
 # Runbook
 
 How to run the deployed server (`https://mcp.my.id`, an Ubuntu VPS shared
-with the unrelated Tamara site) and how to rebuild it from nothing. Every
+with an unrelated site) and how to rebuild it from nothing. Every
 file referenced lives in `deploy/` unless stated otherwise.
 
 ## Layout on the server
@@ -10,7 +10,7 @@ file referenced lives in `deploy/` unless stated otherwise.
 |---|---|
 | App | `~/MCP-backbone` (git clone), `.venv`, `.env` (mode 600, all secrets) |
 | Process | systemd unit `mcp-backbone` → uvicorn on 8443 (TLS) |
-| Public entry | Tamara's Caddy container proxies `mcp.my.id:443` → `https://172.18.0.1:8443` |
+| Public entry | The shared Caddy container (`DEPLOY_CADDY_CONTAINER` in `.env`) proxies `mcp.my.id:443` → `https://172.18.0.1:8443` |
 | Bookkeeping DB | local Postgres 16, database `jarvis_mcp_bookkeeping` (loopback only) |
 | Demo DB | same Postgres, database `pagila_demo`, read-only login `pagila_ro` |
 | TLS cert (8443) | Let's Encrypt via Cloudflare DNS-01, copied by a certbot deploy hook |
@@ -69,7 +69,7 @@ workspace then queries the default database, so it isn't cut off. The script
 never reads or prints the URL. Way back: `scripts/seed_workspace.py` makes a
 new workspace, and the old rows only return from a backup (see Restore below).
 
-**Logs:** `journalctl -u mcp-backbone -f` (app), `docker logs tamara-site`
+**Logs:** `journalctl -u mcp-backbone -f` (app), `docker logs <proxy-container>`
 (Caddy), `~/backups/backup.log` (backups).
 
 ## Monitoring (set up once, outside the server)
@@ -109,13 +109,14 @@ with, or the stored connection URLs can't be decrypted.
    `certbot-deploy-hook.sh` as
    `/etc/letsencrypt/renewal-hooks/deploy/mcp-backbone.sh`, and run it once.
 5. **Service:** install `mcp-backbone.service` (header has the commands).
-6. **Public entry:** add `caddy-mcp.caddyfile` to the Tamara Caddyfile (its
+6. **Public entry:** add `caddy-mcp.caddyfile` to the Caddy container's Caddyfile (its
    header has the validate-then-reload steps).
 7. **Demo database:** `bash deploy/setup_demo_database.sh`.
 8. **Backups:** copy `backup_bookkeeping.sh` to `~/bin/`, add the AWS/S3
    values to `.env`, `crontab deploy/crontab` (merge with any existing
    lines), run it once by hand.
-9. **Firewall:** `bash deploy/firewall.sh`, then test SSH from outside and
+9. **Firewall:** add `DEPLOY_CADDY_CONTAINER` to `.env`, run
+   `bash deploy/firewall.sh`, then test SSH from outside and
    cancel its safety timer.
 10. **Check:** `/healthz` is 200 from outside, a signup works, and a
     `list_tables` through the plugin answers.

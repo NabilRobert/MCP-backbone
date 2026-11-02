@@ -1,11 +1,12 @@
-# Site block for https://mcp.my.id, appended to the Tamara site's Caddyfile on
-# the VPS: /home/ubuntu/sites/tamara-deploy/Caddyfile. Ports 80/443 there
-# belong to that site's Caddy container, so it reverse-proxies this one
-# domain to the MCP server on the host. Caddy gets and renews the
+# Site block for https://mcp.my.id, appended to the Caddyfile of the Caddy
+# container on the VPS. Ports 80/443 there belong to that container, so it
+# reverse-proxies this one domain to the MCP server on the host. In the
+# commands below, <proxy-dir> is the folder holding that Caddyfile, and
+# <proxy-container> is the container (DEPLOY_CADDY_CONTAINER in .env). Caddy gets and renews the
 # certificate for mcp.my.id itself.
 #
-# 172.18.0.1 is the host as seen from the tamara-deploy_default Docker
-# network (its gateway). If that network is ever recreated with a different
+# 172.18.0.1 is the host as seen from that container's Docker network (its
+# gateway). If that network is ever recreated with a different
 # subnet, update this address and --forwarded-allow-ips in
 # deploy/mcp-backbone.service to match.
 #
@@ -21,15 +22,15 @@
 # To change an already-applied block, restore Caddyfile.bak first, then
 # re-run these steps.
 #
-# Apply without rebuilding the image or restarting Tamara. Validate a copy
-# BEFORE it replaces the live file: a broken /etc/caddy/Caddyfile would take
-# Tamara down the next time the container restarts.
-#   cd ~/sites/tamara-deploy && cp Caddyfile Caddyfile.bak
+# Apply without rebuilding the image or restarting the container. Validate a
+# copy BEFORE it replaces the live file: a broken /etc/caddy/Caddyfile would
+# take down everything it serves the next time the container restarts.
+#   cd <proxy-dir> && cp Caddyfile Caddyfile.bak
 #   { echo; sed -n '/^mcp.my.id {/,$p' ~/MCP-backbone/deploy/caddy-mcp.caddyfile; } >> Caddyfile
-#   docker cp Caddyfile tamara-site:/tmp/Caddyfile.new
-#   docker exec tamara-site caddy validate --config /tmp/Caddyfile.new --adapter caddyfile
-#   docker cp Caddyfile tamara-site:/etc/caddy/Caddyfile
-#   docker exec tamara-site caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+#   docker cp Caddyfile <proxy-container>:/tmp/Caddyfile.new
+#   docker exec <proxy-container> caddy validate --config /tmp/Caddyfile.new --adapter caddyfile
+#   docker cp Caddyfile <proxy-container>:/etc/caddy/Caddyfile
+#   docker exec <proxy-container> caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 # The host file is what the image is built from, so the next rebuild keeps it.
 
 mcp.my.id {

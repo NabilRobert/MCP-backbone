@@ -236,10 +236,10 @@ setting things up:
   renewal: copies the new cert to where the service can read it, then
   restarts the service.
 - **`caddy-mcp.caddyfile`** — the site block that makes `https://mcp.my.id`
-  (no port) work. Ports 80/443 on the VPS belong to the unrelated Tamara
-  site's Caddy container, so that Caddy reverse-proxies this one domain to
+  (no port) work. Ports 80/443 on the VPS belong to a Caddy container
+  shared with an unrelated site, so that Caddy reverse-proxies this one domain to
   the MCP server on the host. The file's header has the apply steps,
-  which validate before going live and need no Tamara rebuild.
+  which validate before going live and need no image rebuild.
 - **`setup_demo_database.sh`** — one-off: builds the public demo database
   (Pagila) on the VPS's own Postgres with a real read-only role, proves
   that role can't write or reach the bookkeeping database, then points
