@@ -1249,14 +1249,14 @@ per instance`.
 
 ## 2026-10-22 (continued) — https://mcp.my.id, no port
 
-The VPS's ports 80/443 belong to the unrelated Tamara site's Caddy
+The VPS's ports 80/443 belong to an unrelated site's Caddy
 container, so getting a portless address meant adding one site block to
 that Caddy, reverse-proxying `mcp.my.id` to uvicorn on the host. The
-Tamara Caddyfile turned out to be built into its Docker image, not
+Caddyfile turned out to be built into its Docker image, not
 mounted. Rather than rebuild (which would also redeploy whatever is
-currently in the Tamara source tree), the block is appended to the host
+currently in that site's source tree), the block is appended to the host
 file, copied into the running container, validated from a temp path,
-and only then hot-reloaded. Tamara never restarted, and its two
+and only then hot-reloaded. That site never restarted, and its two
 domains returned the same 200/301 before and after. Caddy got its own
 Let's Encrypt certificate for `mcp.my.id` on the first reload.
 
