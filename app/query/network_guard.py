@@ -10,7 +10,7 @@ This is the validation ADR-004 said would be needed before connection
 strings could ever be set by anyone but the operator.
 
 Checked twice: when a URL is registered, and again every time it's
-used (app/query/service.py's get_data_source), since DNS can change
+used (app/query/target.py's ensure_target_allowed), since DNS can change
 after registration.
 
 Known gap, stated plainly: the address is checked here, then resolved

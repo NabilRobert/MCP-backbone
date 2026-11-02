@@ -53,7 +53,7 @@ from app.benchmark.grading import rows_equal, rows_equal_strict
 from app.benchmark.models import BenchmarkResult, EvalCase
 from app.db import SessionLocal, create_target_engine
 from app.mcp.server import mcp
-from app.query.service import get_data_source
+from app.query.target import get_data_source
 
 # The plain-English instructions given to the AI agent before it starts
 # answering questions. This is the only "prompt engineering" in this

@@ -15,14 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
-from app.db import get_target_engine
 from app.query.models import DataSourceConnection, SchemaCache
-from app.query.service import (
+from app.query.service import QueryOutcome, visible_table_names, write_audit
+from app.query.target import (
     QueryExecutionError,
-    QueryOutcome,
+    caller_safe_error,
+    connect_to_target,
+    ensure_target_allowed,
+    find_data_source,
     get_data_source,
-    visible_table_names,
-    write_audit,
 )
 
 # How long a saved copy of the schema stays "fresh" before we bother
@@ -42,7 +43,7 @@ async def _fetch_live(connection_url: str) -> dict[str, list[dict[str, str]]]:
     """Connects to the real database and asks it directly: what tables
     exist, and what columns (name + type) does each one have? Returns
     something like {"customers": [{"name": "id", "type": "INTEGER"}, ...]}."""
-    async with get_target_engine(connection_url).connect() as conn:
+    async with connect_to_target(connection_url) as conn:
 
         def _inspect(sync_conn: Any) -> dict[str, list[dict[str, str]]]:
             inspector: Inspector = inspect(sync_conn)
@@ -109,22 +110,17 @@ async def describe_table(
     return {"table": table_name, "columns": metadata[table_name]}
 
 
-async def sample_rows(
-    session: AsyncSession, workspace: Workspace, table_name: str, limit: int = 10
-) -> list[dict[str, Any]]:
-    """Answers "show me a few example rows from this table" -- always
-    goes straight to the live database (never the cache), since this is
-    actual data, not just schema information.
-
-    Because it returns real data, every call is written to the audit
-    log and counted against its own rate-limit allowance, the same way
-    run_query is. Before this, a client could read the first 100 rows
-    of every table, as often as it liked, without leaving a trace."""
-    data_source = await get_data_source(session, workspace)
-
-    # Keep the sample small, no matter what was asked for.
-    safe_limit = max(1, min(int(limit), MAX_SAMPLE_ROWS))
-    audit_sql = sample_rows_audit_text(table_name, safe_limit)
+async def _check_sample_allowed(
+    session: AsyncSession, workspace: Workspace, data_source: DataSourceConnection, audit_sql: str
+) -> None:
+    """The address check and the rate limit. A refusal by either is
+    audited, then raised."""
+    try:
+        await ensure_target_allowed(data_source)
+    except QueryExecutionError as exc:
+        refusal = QueryOutcome(status="rejected", error=str(exc))
+        await write_audit(session, data_source, audit_sql, refusal)
+        raise
 
     try:
         await check_and_increment(
@@ -139,37 +135,61 @@ async def sample_rows(
         await write_audit(session, data_source, audit_sql, refusal)
         raise QueryExecutionError(f"sample_rows {exc.reason}") from exc
 
-    metadata = await get_table_metadata(session, workspace, data_source)
-    if table_name not in metadata:
-        reason = f"table '{table_name}' not found"
-        await write_audit(
-            session, data_source, audit_sql, QueryOutcome(status="rejected", error=reason)
-        )
-        raise QueryExecutionError(reason)
 
+async def _read_rows(connection_url: str, table_name: str, limit: int) -> list[dict[str, Any]]:
     # A technical note on why this is safe to build as a plain string
-    # below, instead of being a SQL-injection risk: table_name was just
-    # checked against metadata above, which only ever contains REAL
+    # below, instead of being a SQL-injection risk: the caller just
+    # checked table_name against metadata, which only ever contains REAL
     # table names read directly from the database itself -- it's not
     # raw, unchecked input. Escaping any stray quote characters in the
     # name is an extra layer of care on top of that check, not the
     # only thing keeping this safe.
     quoted_name = table_name.replace('"', '""')
-
-    try:
-        async with get_target_engine(data_source.connection_url).connect() as conn:
-            result = await conn.execute(
-                text(f'SELECT * FROM "{quoted_name}" LIMIT :limit'), {"limit": safe_limit}
-            )
-            rows = [
-                dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
-                for row in result
-            ]
-    except Exception as exc:  # recorded, then re-raised as a clean tool error
-        await write_audit(
-            session, data_source, audit_sql, QueryOutcome(status="errored", error=str(exc))
+    async with connect_to_target(connection_url) as conn:
+        result = await conn.execute(
+            text(f'SELECT * FROM "{quoted_name}" LIMIT :limit'), {"limit": limit}
         )
-        raise QueryExecutionError(f"sample_rows failed: {exc}") from exc
+        return [
+            dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
+            for row in result
+        ]
+
+
+async def sample_rows(
+    session: AsyncSession, workspace: Workspace, table_name: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Answers "show me a few example rows from this table" -- always
+    goes straight to the live database (never the cache), since this is
+    actual data, not just schema information.
+
+    Because it returns real data, every call is written to the audit
+    log and counted against its own rate-limit allowance, the same way
+    run_query is. Before this, a client could read the first 100 rows
+    of every table, as often as it liked, without leaving a trace."""
+    data_source = await find_data_source(session, workspace)
+
+    # Keep the sample small, no matter what was asked for.
+    safe_limit = max(1, min(int(limit), MAX_SAMPLE_ROWS))
+    audit_sql = sample_rows_audit_text(table_name, safe_limit)
+
+    await _check_sample_allowed(session, workspace, data_source, audit_sql)
+
+    rows: list[dict[str, Any]] | None = None
+    try:
+        metadata = await get_table_metadata(session, workspace, data_source)
+        if table_name in metadata:
+            rows = await _read_rows(data_source.connection_url, table_name, safe_limit)
+    except Exception as exc:  # recorded, then re-raised as a clean tool error
+        reason = caller_safe_error(exc)
+        failure = QueryOutcome(status="errored", error=reason)
+        await write_audit(session, data_source, audit_sql, failure)
+        raise QueryExecutionError(f"sample_rows failed: {reason}") from exc
+
+    if rows is None:
+        reason = f"table '{table_name}' not found"
+        refusal = QueryOutcome(status="rejected", error=reason)
+        await write_audit(session, data_source, audit_sql, refusal)
+        raise QueryExecutionError(reason)
 
     await write_audit(session, data_source, audit_sql, QueryOutcome(status="succeeded"))
     return rows

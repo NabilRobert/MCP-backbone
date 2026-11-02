@@ -5,6 +5,7 @@ the same two things: check who's asking (app/auth/service.py), then
 hand off to the real logic in app/query/."""
 
 import functools
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -19,9 +20,15 @@ from app.auth.service import AuthenticationError, ToolNotPermitted, authenticate
 from app.db import SessionLocal
 from app.query import schema_cache
 from app.query import service as query_service
-from app.query.service import QueryExecutionError
+from app.query.target import QueryExecutionError
 from app.tracing import stage
 from app.version import BUILD_VERSION
+
+logger = logging.getLogger(__name__)
+
+# For a failure we didn't expect, whose own text can't be trusted to be
+# safe: it could name a database host. The details go to the server log.
+UNEXPECTED_ERROR = "the server hit an unexpected error: try again in a moment"
 
 
 class _StrictSchemaServer(MCPServer):
@@ -61,7 +68,7 @@ def _resolve_api_key(ctx: Context) -> str:
             return auth_header.removeprefix("Bearer ").strip()
         raise AuthenticationError(
             "missing API key: over HTTP, send it as an 'Authorization: Bearer <key>' header "
-            "(the api_key argument is only accepted on local transports)"
+            "(local transports send it as _meta.api_key instead)"
         )
     meta = ctx.request_context.meta or {}
     api_key = meta.get("api_key")
@@ -94,6 +101,9 @@ def _translate_errors[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Await
             return await fn(*args, **kwargs)
         except (AuthenticationError, QueryExecutionError) as exc:
             raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            logger.exception("a tool call failed unexpectedly")
+            raise ToolError(UNEXPECTED_ERROR) from exc
 
     return wrapper
 

@@ -26,7 +26,7 @@ class DataSourceConnection(Base):
     - Its own (an invited user's, or one the operator seeded): stored
       ENCRYPTED (see app/crypto.py), and checked by
       app/query/network_guard.py at registration and again by
-      get_data_source() on every use.
+      ensure_target_allowed() on every use.
 
     Callers just read `connection_url`, which handles both."""
 

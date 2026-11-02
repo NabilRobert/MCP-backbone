@@ -108,7 +108,7 @@ request's `_meta`. Off without the variable. No SQL text or rejection
 reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
 [app/tracing.py](app/tracing.py).
 
-**Tests** (163, against real Postgres, run in CI on every push) need a
+**Tests** (179, against real Postgres, run in CI on every push) need a
 disposable database. The suite drops every table after each test and
 refuses to run unless the database name contains `test`. It also needs
 `CREATEROLE`, because the red-team tests create real throwaway roles:
@@ -133,7 +133,7 @@ app/
   mcp/        the MCP tools: a thin adapter, no business logic
   benchmark/  text-to-SQL eval cases and grading
 migrations/   Alembic migrations for the bookkeeping database
-tests/        163 tests against real Postgres, incl. the red-team suite
+tests/        179 tests against real Postgres, incl. the red-team suite
 static-src/   the console's TypeScript (compiled into app/console/static)
 plugin/       the Claude Code plugin (MCP registration + query skill)
 deploy/       systemd unit, Caddy block, firewall, backups, runbook

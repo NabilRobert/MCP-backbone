@@ -3,7 +3,8 @@ from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from app.auth.models import Workspace
 from app.db import create_target_engine, get_target_engine
-from app.query.service import get_data_source, list_tables
+from app.query.service import list_tables
+from app.query.target import get_data_source
 
 
 def test_bare_postgres_scheme_gets_asyncpg_driver() -> None:

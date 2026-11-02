@@ -58,12 +58,13 @@ sequenceDiagram
    returns its `Workspace`. If the key's scopes don't include
    `run_query`, it raises `ToolNotPermitted`, and the refusal is still
    audited (`app/query/service.py: record_refusal`).
-4. **Which database?** `app/query/service.py: get_data_source` finds the
+4. **Which database?** `app/query/target.py: find_data_source` finds the
    workspace's target database. A user's own URL is decrypted
    (`app/crypto.py: decrypt`) and checked again for private addresses
-   (`app/query/network_guard.py: ensure_public_target`), because DNS can
-   change after signup. The server's default database skips that check:
-   the operator chose it, and it may be on localhost.
+   (`app/query/target.py: ensure_target_allowed`), because DNS can change
+   after signup. A refused address ends the request as `rejected`. The
+   server's default database skips that check: the operator chose it,
+   and it may be on localhost.
 5. **Rate limit.** `app/query/service.py: _check_rate_limit` calls
    `app/auth/rate_limit.py: check_and_increment`: at most 5 queries per
    workspace per hour by default. It counts before the SQL is checked,
@@ -76,37 +77,34 @@ sequenceDiagram
    refused too, though one inside a sub-query passes. It adds
    `LIMIT 1000` if there's no limit. Nothing has touched the target
    database yet.
-7. **Is it too expensive?** `app/query/service.py: run_query` opens one
-   connection to the target (`app/db.py: get_target_engine`). Every
-   transaction on it is `READ ONLY`, and steps 7 and 8 share one
-   transaction. `app/query/service.py: _estimate_cost` calls
+7. **Is it too expensive?** `app/query/service.py: _query_target` opens
+   a connection with `app/query/target.py: connect_to_target`, the one
+   way every tool reaches a target. Every transaction on it is
+   `READ ONLY`. `app/query/service.py: _estimate_cost` calls
    `app/query/cost_check.py: check_cost`, which asks Postgres for the
    plan's cost with `EXPLAIN`, without running the query, under a
    2-second timeout. Over 40,000, it's rejected.
-8. **Run it.** `app/query/service.py: _execute` sets a 5-second statement
-   timeout and calls `app/query/service.py: _run_with_retry`. That
-   retries once if the connection dropped, but never if the query was
-   just slow. `app/query/service.py: _fetch_capped` reads at most 200
-   rows.
+8. **Run it.** `app/query/service.py: _execute` calls
+   `app/query/service.py: _run_with_retry`, which takes a fresh connection
+   and sets a 5-second statement timeout. If the connection drops, it
+   tries once more on a new connection. It never retries a query that
+   was just slow. `app/query/service.py: _fetch_capped` reads at most
+   200 rows.
 9. **Audit, then answer.** `app/query/service.py: _finish` calls
    `app/query/service.py: write_audit`, which saves one `QueryExecution`
    row (the audit log), and only then returns the result. If the audit
    write fails, the caller gets an error, not the rows.
 
-Steps 5 to 8 end a request by returning a `QueryOutcome`
+Steps 4 to 8 end a request by returning a `QueryOutcome`
 (`app/query/service.py: QueryOutcome`), and `_finish` audits it. So a
-refused query is logged exactly like a successful one.
+refused or failed query is logged exactly like a successful one.
 
-Three known gaps, all reported as bugs:
-
-- If step 4 fails (no data source, or an address that's now private), it
-  raises an error and nothing is audited.
-- If the target can't be reached when step 7 opens the connection, the
-  error escapes `run_query` and nothing is audited.
-- The retry in step 8 can't succeed yet. It reuses the broken connection,
-  so the second try fails and the query ends as `errored`. What does
-  protect you is `pool_pre_ping` (`app/db.py: create_target_engine`),
-  which replaces a dead connection before a query starts.
+A failure never shows the caller the database's host or port. A broken
+connection gets one fixed message (`app/query/target.py: caller_safe_error`),
+and the details go to the server log. Anything we didn't expect is caught
+by `app/mcp/server.py: _translate_errors` and handled the same way. A
+database's own error, like an unknown column, is passed on, because it
+helps the model fix its SQL.
 
 ### The other three tools
 
@@ -187,12 +185,12 @@ and prints the code once. The other scripts work the same way:
 | `SECURITY DEFINER` | A Postgres function that runs with its owner's rights, so it can write even when called by a read-only login. | `docs/threat-model.md` |
 | Cost check | Asking Postgres how expensive a query would be, and refusing it over a threshold. | `app/query/cost_check.py: check_cost` |
 | `EXPLAIN` | The Postgres command that returns a query's plan and estimated cost without running it. | `app/query/cost_check.py: check_cost` |
-| Statement timeout | A Postgres setting that kills a query after N seconds. Set per transaction with `SET LOCAL`. | `app/query/service.py: _execute` |
+| Statement timeout | A Postgres setting that kills a query after N seconds. Set per transaction with `SET LOCAL`. | `app/query/service.py: _run_with_retry` |
 | `READ ONLY` transaction | Postgres refuses every write in it, even from a `SECURITY DEFINER` function. | `app/db.py: create_target_engine` |
 | Read-only role | A database login that can only `SELECT`. A second guard behind the transaction. | `scripts/provision_readonly_role.py` |
 | Row cap | At most 200 rows go back to the model; more are cut off with a note. | `app/query/service.py: _fetch_capped` |
 | Rate limit | At most N calls per workspace per hour. A fixed window: the count resets when the hour is up. Counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
-| Audit log | One `QueryExecution` row per attempt, refused or not (see the known gaps above). The console shows it. | `app/query/service.py: write_audit` |
+| Audit log | One `QueryExecution` row per attempt, refused or not. The console shows it. | `app/query/service.py: write_audit` |
 | `QueryOutcome` | How one attempt ended: status, reason, cost, rows. | `app/query/service.py: QueryOutcome` |
 | Schema cache | A 5-minute copy of table and column names, for the browsing tools only. | `app/query/schema_cache.py: get_table_metadata` |
 | Network guard | Refuses a database URL that points at a private or local address (SSRF protection). | `app/query/network_guard.py: ensure_public_target` |
