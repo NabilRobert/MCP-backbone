@@ -144,8 +144,10 @@ docs/         architecture, threat model, results, build log, planning
 ## Docs
 
 How it works:
+- [Guide](docs/guide.md): a plain-English walk through one request,
+  a glossary, and where to change things. Start here if you're new.
 - [Architecture](docs/architecture.md): a guided tour of the code, following a
-  request through it. Start here.
+  request through it.
 - [Decisions (ADRs)](docs/planning/phase-5-architecture-decisions.md): ten
   decisions, each with alternatives, consequences and sources.
 - [Threat model](docs/threat-model.md): what it defends against, how, and
