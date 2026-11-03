@@ -55,7 +55,7 @@ async def provision(
         # a query that bypasses the app can't run forever. int() keeps
         # anything but a number out of the SQL.
         await conn.execute(
-            f"alter role \"{role_name}\" set statement_timeout = "
+            f'alter role "{role_name}" set statement_timeout = '
             f"'{int(statement_timeout_seconds)}s'"
         )
         # Allow it to connect to the database at all...
@@ -71,8 +71,7 @@ async def provision(
         # the module docstring above for exactly what this does and
         # doesn't cover).
         await conn.execute(
-            f'alter default privileges in schema "{schema}" '
-            f'grant select on tables to "{role_name}"'
+            f'alter default privileges in schema "{schema}" grant select on tables to "{role_name}"'
         )
         # Block this role from calling any custom function in the
         # schema -- defense-in-depth against the SECURITY DEFINER

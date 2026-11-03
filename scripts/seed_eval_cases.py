@@ -209,6 +209,7 @@ PAGILA: list[tuple[str, str, str]] = [
     ),
 ]
 
+
 async def seed() -> int:
     async with SessionLocal() as session:
         await session.execute(delete(BenchmarkResult))

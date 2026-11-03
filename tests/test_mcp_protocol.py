@@ -133,4 +133,3 @@ async def test_tool_calls_over_real_http_transport_with_header_auth(
             via_meta = await session.call_tool("list_tables", {}, meta={"api_key": api_key})
             assert via_meta.is_error is True
             assert "Authorization" in str(via_meta.content)
-
