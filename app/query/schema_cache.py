@@ -8,6 +8,7 @@ import datetime
 import json
 from typing import Any
 
+import anyio
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.config import settings
 from app.query.models import DataSourceConnection, SchemaCache
 from app.query.service import (
     QueryOutcome,
+    audit_cancelled,
     target_failure_outcome,
     visible_table_names,
     write_audit,
@@ -183,6 +185,9 @@ async def sample_rows(
         metadata = await get_table_metadata(session, workspace, data_source)
         if table_name in metadata:
             rows = await _read_rows(data_source.connection_url, table_name, safe_limit)
+    except anyio.get_cancelled_exc_class():
+        await audit_cancelled(session, data_source, audit_sql)
+        raise
     except Exception as exc:  # recorded, then re-raised as a clean tool error
         reason = caller_safe_error(exc)
         failure = QueryOutcome(status="errored", error=reason)

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     target_database_url: str  # the outside database AI clients can query
     query_timeout_seconds: int = 5  # kill a real query after this long
     explain_timeout_seconds: int = 2  # kill the cost-estimate step after this long
+    # Give up connecting to a target after this long. asyncpg's own default is
+    # 60 s, which a host that silently drops packets would use up in full.
+    target_connect_timeout_seconds: int = 10
     # Reject a query estimated pricier than this. Calibrated against
     # real Pagila data -- see .env.example and docs/journey.md for the
     # actual measurements behind this number and a known gap it

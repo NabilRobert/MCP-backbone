@@ -47,6 +47,8 @@ def create_target_engine(connection_url: str, *, pooled: bool = False) -> AsyncE
 
     Every target connection gets:
     - statement_cache_size=0, for the same PgBouncer reason as above.
+    - a connect timeout (APP_TARGET_CONNECT_TIMEOUT_SECONDS), so a host
+      that silently drops packets fails in seconds, not asyncpg's 60.
     - the +asyncpg driver, whatever the URL says: a bare "postgresql://"
       resolves to psycopg under this SQLAlchemy, which isn't installed.
     - READ ONLY transactions (postgresql_readonly, i.e. BEGIN READ ONLY,
@@ -69,7 +71,10 @@ def create_target_engine(connection_url: str, *, pooled: bool = False) -> AsyncE
     )
     return create_async_engine(
         connection_url,
-        connect_args={"statement_cache_size": 0},
+        connect_args={
+            "statement_cache_size": 0,
+            "timeout": settings.target_connect_timeout_seconds,
+        },
         execution_options={"postgresql_readonly": True},
         **options,
     )
