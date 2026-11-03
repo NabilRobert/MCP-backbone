@@ -11,6 +11,7 @@ from starlette.requests import Request
 
 from app.auth.models import ConsoleCredential, Workspace
 from app.auth.security import hash_password, needs_rehash, verify_password
+from app.auth.signup import MIN_PASSWORD_LENGTH
 from app.console.csrf import rotate_csrf_token
 
 # A real-looking but fake stored hash, used only so that checking a
@@ -93,3 +94,26 @@ async def revoke_all_sessions(session: AsyncSession, workspace: Workspace) -> No
     if credential is not None:
         credential.session_version += 1
         await session.commit()
+
+
+class ResetRefused(Exception):
+    """A password reset was refused. The message says why, and nothing changed."""
+
+
+async def reset_console_password(session: AsyncSession, username: str, new_password: str) -> None:
+    """Sets a new console password and logs out every session the login
+    has, on every browser. For scripts/reset_console_password.py: the
+    console has no reset page, since it has no other way to prove who's
+    asking. Also the way to replace an old scrypt hash for a login that
+    nobody uses, since only a successful login upgrades one."""
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise ResetRefused(f"the password must be at least {MIN_PASSWORD_LENGTH} characters")
+    result = await session.execute(
+        select(ConsoleCredential).where(ConsoleCredential.username == username)
+    )
+    credential = result.scalar_one_or_none()
+    if credential is None:
+        raise ResetRefused(f"no console login named '{username}'")
+    credential.password_hash = hash_password(new_password)
+    credential.session_version += 1
+    await session.commit()
