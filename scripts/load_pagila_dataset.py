@@ -1,7 +1,7 @@
 """Loads Pagila -- a real, well-known public Postgres sample database
 (a DVD rental store: actors, films, customers, rentals, payments,
-stores, 16+ tables) -- into the target database, as a richer
-alternative to load_demo_dataset.py's hand-generated synthetic data.
+stores, 16+ tables) -- into the target database. It replaced an earlier
+hand-generated toy dataset (see docs/journey.md).
 
 Source: https://github.com/devrimgunduz/pagila (the standard Postgres
 port of MySQL's "Sakila" sample database). Used here only as public
@@ -11,8 +11,7 @@ project, and this script makes no other claim about it.
 Needs `psql` on PATH (or pass --psql with a full path). The schema
 file defines several PL/pgSQL trigger functions with semicolons inside
 their own bodies, which a naive "split on semicolons and run each
-piece" approach -- the trick load_demo_dataset.py's much simpler
-schema gets away with -- would corrupt. Only a real SQL client parses
+piece" approach would corrupt. Only a real SQL client parses
 that correctly. Schema and data are fed to ONE continuous `psql`
 session (not a separate connection per file): pg_dump's "COPY ...
 FROM stdin" data format is designed for exactly this -- psql reads the
