@@ -192,6 +192,9 @@ setting things up:
 - **`seed_workspace.py`** — create a new workspace + its first API key
   directly, without an invite.
 - **`revoke_key.py`** — kill an existing API key.
+- **`reset_console_password.py`** — set a new console password, asked for
+  twice and never on the command line. Replaces an old scrypt hash and
+  logs that login out everywhere.
 - **`remove_connection.py`** — forget a workspace's stored database URL,
   or remove the whole workspace. Shows what it would do unless given
   `--apply`, and never reads the URL, so it works on one that no longer

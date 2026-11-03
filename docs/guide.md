@@ -166,6 +166,9 @@ and prints the code once. The other scripts work the same way:
 `scripts/revoke_key.py: revoke` revokes a key, and
 `scripts/remove_connection.py: clean_up` removes a stored database URL
 or a whole workspace, changing nothing without `--apply`.
+`scripts/reset_console_password.py: reset` sets a new console password
+(`app/console/auth.py: reset_console_password`) and logs that login out
+everywhere.
 
 ## Glossary
 

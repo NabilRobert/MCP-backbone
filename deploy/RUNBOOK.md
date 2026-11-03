@@ -53,6 +53,13 @@ a deploy it should match `git rev-parse --short=12 HEAD`.
 Without the flags a workspace keeps the server defaults. To change one later:
 `UPDATE workspaces SET query_rate_limit = <n> WHERE name = '<name>';` (NULL = back to the default).
 
+**Reset a console password** (someone can't log in, or a login still has an
+old scrypt hash that nobody logs in with to upgrade). It asks for the new
+password twice, and logs that login out everywhere:
+```bash
+.venv/bin/python -m scripts.reset_console_password --username <name>
+```
+
 **Revoke access:** a workspace's own console (Keys page: revoke the key, or
 log out everywhere), or `scripts/revoke_key.py`.
 
