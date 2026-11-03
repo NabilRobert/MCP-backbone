@@ -9,6 +9,7 @@ import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
+import anyio
 import asyncpg  # pyright: ignore[reportMissingTypeStubs] -- asyncpg ships no stubs
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -37,6 +38,9 @@ from app.tracing import DB_ATTRIBUTES, mark_failed, stage
 
 MAX_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 0.5
+
+# Audited when the caller gives up while its query is running.
+QUERY_CANCELLED = "the request was cancelled before the query finished"
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,19 @@ async def write_audit(
             )
         )
         await session.commit()
+
+
+async def audit_cancelled(
+    session: AsyncSession, data_source: DataSourceConnection, sql: str
+) -> None:
+    """Audits a query whose caller gave up while it ran (a cancelled MCP
+    request). The query still reached the database, so it's recorded. The
+    write is shielded: inside a cancelled anyio scope, which is how the MCP
+    SDK cancels a request, every later await would be cancelled too."""
+    with anyio.CancelScope(shield=True):
+        await write_audit(
+            session, data_source, sql, QueryOutcome(status="errored", error=QUERY_CANCELLED)
+        )
 
 
 async def record_refusal(
@@ -165,7 +182,11 @@ async def run_query(session: AsyncSession, workspace: Workspace, sql: str) -> di
     if isinstance(validated, QueryOutcome):
         return await _finish(session, data_source, sql, validated)
 
-    outcome = await _query_target(data_source.connection_url, validated)
+    try:
+        outcome = await _query_target(data_source.connection_url, validated)
+    except anyio.get_cancelled_exc_class():
+        await audit_cancelled(session, data_source, sql)
+        raise
     return await _finish(session, data_source, sql, outcome)
 
 

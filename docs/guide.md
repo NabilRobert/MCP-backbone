@@ -97,7 +97,9 @@ sequenceDiagram
 
 Steps 4 to 8 end a request by returning a `QueryOutcome`
 (`app/query/service.py: QueryOutcome`), and `_finish` audits it. So a
-refused or failed query is logged exactly like a successful one.
+refused or failed query is logged exactly like a successful one. So is a
+query whose caller cancels it while it runs
+(`app/query/service.py: audit_cancelled`).
 
 A failure never shows the caller the database's host or port. A broken
 connection gets one fixed message (`app/query/target.py: caller_safe_error`),
