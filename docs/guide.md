@@ -72,9 +72,9 @@ sequenceDiagram
    request ends here as `rejected`.
 6. **Is the SQL safe?** `app/query/service.py: _validate` calls
    `app/query/validation.py: validate_and_normalize`. It parses the SQL
-   with sqlglot and requires exactly one `SELECT`, with no write hidden
-   anywhere inside it and no unknown functions. A top-level `UNION` is
-   refused too, though one inside a sub-query passes. It adds
+   with sqlglot and requires exactly one `SELECT` (or `SELECT`s joined by
+   `UNION`, `INTERSECT` or `EXCEPT`), with no write hidden anywhere
+   inside it, no row lock (`FOR UPDATE`) and no unknown functions. It adds
    `LIMIT 1000` if there's no limit. Nothing has touched the target
    database yet.
 7. **Is it too expensive?** `app/query/service.py: _query_target` opens

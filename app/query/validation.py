@@ -63,9 +63,11 @@ def validate_and_normalize(sql: str) -> str:
 
     statement = statements[0]
 
-    # Check 3: is the statement a plain SELECT (a read)? Anything else
-    # (UPDATE, DELETE, DROP, ...) is rejected immediately.
-    if not isinstance(statement, exp.Select):
+    # Check 3: is the statement a read? A plain SELECT, or SELECTs joined
+    # by UNION, INTERSECT or EXCEPT (one "set operation"). Anything else
+    # (UPDATE, DELETE, DROP, ...) is rejected immediately. Checks 4 to 6
+    # walk the whole tree, so every branch of a set operation gets them too.
+    if not isinstance(statement, exp.Select | exp.SetOperation):
         raise QueryRejected("only SELECT statements are allowed")
 
     # Check 4: does this SELECT have a write hidden somewhere INSIDE it?
@@ -81,7 +83,15 @@ def validate_and_normalize(sql: str) -> str:
         kinds = sorted({type(node).__name__ for node in write_nodes})
         raise QueryRejected(f"query contains a write operation: {', '.join(kinds)}")
 
-    # Check 5: does the query call any function we haven't explicitly
+    # Check 5: does it lock rows (FOR UPDATE, FOR SHARE)? A lock writes
+    # nothing, but it makes other sessions' writes wait. Postgres refuses
+    # one in a READ ONLY transaction anyway; this gives a clearer reason.
+    if statement.find(exp.Lock):
+        raise QueryRejected(
+            "row locks (FOR UPDATE, FOR SHARE) aren't allowed: they make other sessions wait"
+        )
+
+    # Check 6: does the query call any function we haven't explicitly
     # allowed? Ordinary, well-known functions (COUNT, LOWER, SUM, ...)
     # are always fine. The danger is a function that LOOKS like a normal
     # read but secretly performs a write when called -- something the

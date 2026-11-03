@@ -41,9 +41,10 @@ might fail:
 1. **Auth:** a workspace API key in the `Authorization` header, stored only
    as a hash, revocable from the console, and limited to the tools it needs
    (full access, explore only, or schema only). Per-workspace rate limits.
-2. **Validation:** exactly one `SELECT`. The whole syntax tree is checked for
-   hidden writes (a write inside a CTE, `SELECT INTO`), and only built-in
-   functions are allowed.
+2. **Validation:** exactly one `SELECT` (`UNION`, `INTERSECT` and `EXCEPT`
+   allowed). The whole syntax tree is checked for hidden writes (a write
+   inside a CTE, `SELECT INTO`) and row locks (`FOR UPDATE`), and only
+   built-in functions are allowed.
 3. **Cost check:** `EXPLAIN` estimates the cost before anything runs, and
    expensive queries are rejected.
 4. **Execution limits:** a statement timeout, and results capped at 200 rows.
