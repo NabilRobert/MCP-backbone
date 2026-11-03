@@ -260,9 +260,7 @@ async def test_read_only_role_timeout_kills_a_slow_query_outside_the_app(
         drivername="postgresql"
     )
     admin_dsn = admin_url.render_as_string(hide_password=False)
-    password = await provision(
-        admin_dsn, role_name, admin_url.database or "postgres", "public", 1
-    )
+    password = await provision(admin_dsn, role_name, admin_url.database or "postgres", "public", 1)
     role_url = admin_url.set(username=role_name, password=password, drivername="postgresql+asyncpg")
 
     engine = create_async_engine(role_url)

@@ -135,7 +135,9 @@ async def readonly_role_workspace(
     admin_dsn = admin_url.render_as_string(hide_password=False)
     database = admin_url.database or "postgres"
 
-    await db_session.execute(text("create table if not exists redteam_items (id serial primary key, label text)"))
+    await db_session.execute(
+        text("create table if not exists redteam_items (id serial primary key, label text)")
+    )
     await db_session.execute(text("delete from redteam_items"))
     await db_session.execute(text("insert into redteam_items (label) values ('a'), ('b')"))
     await db_session.commit()

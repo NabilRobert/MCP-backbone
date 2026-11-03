@@ -44,4 +44,3 @@ async def test_target_engines_are_pooled_and_reused(
     assert engine is get_target_engine(url)
     assert isinstance(engine.pool, AsyncAdaptedQueuePool)
     assert engine.pool.checkedin() == 1  # both calls used the same connection
-

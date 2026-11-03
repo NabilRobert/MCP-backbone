@@ -1,18 +1,15 @@
-"""Seeds the text-to-SQL benchmark questions (Slice E). Two sets:
-
-- pagila (default, 30 questions): the live demo database. Hand-written,
-  since no public text-to-SQL benchmark targets Pagila, and checked
-  against the actual data before use: every answer is small (well under
-  the 200-row result cap), every "top N" question has a clear gap at its
-  cut-off (no ties that would make two answers equally right), and date
-  questions say UTC, since the columns are timestamptz and the answer
-  would otherwise depend on the server's time zone.
-- demo (10 questions): the original toy storefront from
-  scripts/load_demo_dataset.py.
+"""Seeds the text-to-SQL benchmark questions (Slice E): 30 questions over
+the live demo database, Pagila. Hand-written, since no public text-to-SQL
+benchmark targets Pagila, and checked against the actual data before use:
+every answer is small (well under the 200-row result cap), every "top N"
+question has a clear gap at its cut-off (no ties that would make two
+answers equally right), and date questions say UTC, since the columns are
+timestamptz and the answer would otherwise depend on the server's time
+zone.
 
 Replaces the current set, and clears any results recorded against it.
 
-    python -m scripts.seed_eval_cases [--dataset pagila|demo]
+    python -m scripts.seed_eval_cases
 """
 
 import argparse
@@ -212,83 +209,22 @@ PAGILA: list[tuple[str, str, str]] = [
     ),
 ]
 
-DEMO: list[tuple[str, str, str]] = [
-    ("unrated", "How many customers are there in total?", "select count(*) from customers"),
-    (
-        "unrated",
-        "List the names of all products in the 'electronics' category.",
-        "select name from products where category = 'electronics'",
-    ),
-    (
-        "unrated",
-        "What is the total revenue across all order items?",
-        "select sum(quantity * unit_price) from order_items",
-    ),
-    (
-        "unrated",
-        "Which country has the most customers?",
-        "select country from customers group by country order by count(*) desc limit 1",
-    ),
-    (
-        "unrated",
-        "How many orders have the status 'cancelled'?",
-        "select count(*) from orders where status = 'cancelled'",
-    ),
-    (
-        "unrated",
-        "What is the average price of products in the 'books' category?",
-        "select avg(price) from products where category = 'books'",
-    ),
-    (
-        "unrated",
-        "How many distinct products have been ordered at least once?",
-        "select count(distinct product_id) from order_items",
-    ),
-    (
-        "unrated",
-        "What is the name of the most expensive product?",
-        "select name from products order by price desc limit 1",
-    ),
-    (
-        "unrated",
-        "For each order status, how many orders are there?",
-        "select status, count(*) from orders group by status",
-    ),
-    (
-        "unrated",
-        (
-            "What are the ids of the top 5 customers by total amount spent, and how much did each "
-            "spend?"
-        ),
-        (
-            "select o.customer_id, sum(oi.quantity * oi.unit_price) as total from orders o "
-            "join order_items oi on oi.order_id = o.id group by o.customer_id "
-            "order by total desc limit 5"
-        ),
-    ),
-]
 
-DATASETS = {"pagila": PAGILA, "demo": DEMO}
-
-
-async def seed(dataset: str) -> int:
-    cases = DATASETS[dataset]
+async def seed() -> int:
     async with SessionLocal() as session:
         await session.execute(delete(BenchmarkResult))
         await session.execute(delete(EvalCase))
-        for difficulty, question, expected_sql in cases:
+        for difficulty, question, expected_sql in PAGILA:
             session.add(
                 EvalCase(question=question, expected_sql=expected_sql, difficulty=difficulty)
             )
         await session.commit()
-    return len(cases)
+    return len(PAGILA)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", choices=sorted(DATASETS), default="pagila")
-    args = parser.parse_args()
-    print(f"Seeded {asyncio.run(seed(args.dataset))} {args.dataset} eval cases.")
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    print(f"Seeded {asyncio.run(seed())} eval cases.")
 
 
 if __name__ == "__main__":

@@ -110,4 +110,6 @@ def test_strict_grading_has_no_tolerance() -> None:
         [{"r": "PG", "n": 194}, {"r": "G", "n": 178}],
         [{"rating": "G", "count": 178}, {"rating": "PG", "count": 194}],
     )  # rows in any order, column names don't matter
-    assert not rows_equal_strict([{"n": 194, "r": "PG"}], [{"r": "PG", "n": 194}])  # swapped columns
+    assert not rows_equal_strict(
+        [{"n": 194, "r": "PG"}], [{"r": "PG", "n": 194}]
+    )  # swapped columns
