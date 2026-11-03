@@ -424,6 +424,11 @@ async def test_pagila_loader_drops_the_grant_that_opens_its_schema() -> None:
         "create temp table rt_ro_tmp (x int)",
         "select rt_ro_probe_write()",  # SECURITY DEFINER: a read-only ROLE can't stop this one
         "select set_config('transaction_read_only', 'off', true), (select 1)",
+        # Row locks: not writes, but they make other sessions' writes wait.
+        "select * from rt_ro_probe for update",
+        "select * from rt_ro_probe for no key update",
+        "select * from rt_ro_probe for share",
+        "select * from rt_ro_probe for key share",
     ],
 )
 async def test_target_connections_refuse_writes_even_past_the_validator(
