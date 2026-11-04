@@ -20,3 +20,8 @@ The spike write-ups (the throwaway experiments that tested the riskiest
 assumptions before the build) are in
 [phase 6, under "Spikes"](phase-6-risks-skeleton.md#spikes-time-boxed-throwaway-experiments).
 Each spike's result is recorded there.
+
+Plans written after the build:
+
+- [Accuracy benchmark](accuracy-benchmark-plan.md): accuracy, refusal rate
+  and cost per question over Project 13's shared tasks (not yet approved).
