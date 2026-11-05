@@ -16,8 +16,9 @@ The plan and its decisions are in
 had a dry run with a scripted mock model at $0. There are no results yet.
 The real run waits for Project 13's overnight baselines and Arthur's go.
 - Model: `qwen3.5:4b` on Ollama, 5 tries per task, at about 10 to 15 hours.
-- Before it starts, the per-trial caps must be decided (an open question in
-  the plan).
+- Each trial is capped at 600 s and 250,000 tokens. The harness's defaults
+  are set for a fast paid model, and would fail a slow local one for running
+  out of time rather than for a wrong answer.
 - These figures won't be comparable with Project 13's, which grades on two
   copies with its own runner.
 
@@ -36,7 +37,7 @@ the step says otherwise. Run nothing while Project 13's stack is in use.
      checkout.
 4. Dev run: the 10 dev tasks, 5 tries each.
    ```bash
-   uv run agent-eval run --suite suites/analyst-env.yaml --tasks n02,n07,n12,n19,n21,n27,n32,n36,n40,n46 --model ollama/qwen3.5:4b --epochs 5 --max-samples 1 --budget 0.01 --run-id bench-dev-qwen3.5-4b
+   uv run agent-eval run --suite suites/analyst-env.yaml --tasks n02,n07,n12,n19,n21,n27,n32,n36,n40,n46 --model ollama/qwen3.5:4b --epochs 5 --max-samples 1 --time-limit 600 --token-limit 250000 --budget 0.01 --run-id bench-dev-qwen3.5-4b
    ```
    - It measures the time per try, and how many trials hit a cap.
    - Check its refusal counts against this server's audit log.

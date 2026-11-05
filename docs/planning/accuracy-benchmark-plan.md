@@ -287,18 +287,16 @@ public tasks:
 - **Arthur:**
   - ~~OK the plan; the paid row; the two extra local models.~~ Answered
     2026-11-05: OK'd, with neither the paid row nor the extra models.
-  - **The per-trial caps for the local run (D6).** The harness stops every
-    trial at 120 s or 60,000 tokens, and a capped trial counts as a fail.
-    Those caps were set for gpt-5-mini. qwen3:1.7b averaged 1.7 minutes a
-    try in Project 13, and qwen3.5:4b is slower. Its prompts reach about
-    14,000 tokens by turn 16. So many trials would fail on a cap, not on
-    the answer.
-    - **Recommended:** 600 s and 250,000 tokens, set before the dev run
-      and recorded in the run's metadata. The caps are guards against
-      runaways at $0, not part of what's measured.
+  - ~~The per-trial caps for the local run (D6).~~ Answered 2026-11-05:
+    600 s and 250,000 tokens. The harness's defaults (120 s and 60,000
+    tokens, a capped trial counting as a fail) were set for gpt-5-mini.
+    qwen3:1.7b averaged 1.7 minutes a try in Project 13, and qwen3.5:4b is
+    slower, so on the defaults many trials would fail on a cap, not on the
+    answer.
+    - The caps guard against runaways at $0. They aren't part of what's
+      measured, and the run's metadata records them.
     - The dev run reports how many trials hit a cap. If more than a few
       do, the caps are revisited before the full run, not after it.
-    - This is a small option in the harness, for its session.
   - Later, only if he wants it: a held-out figure, decided after Project 13's
     final records are committed. Project 13 recommends against it.
 - **Follow-up, separate and Arthur's call:** retire v1's runner
@@ -308,9 +306,11 @@ public tasks:
 
 ## Built so far (2026-11-05)
 
-Step 1 is in agent-eval-harness, in three PRs. Merge them in this order:
+Step 1 is in agent-eval-harness, in four PRs. Merge them in this order:
 `feat/ordered-result-match` (1d), then `feat/sql-analyst-env-benchmark`
-(1a to 1c, stacked on it). `feat/refusal-counts` (1e) can merge at any time.
+(1a to 1c, stacked on it), then `feat/trial-limit-options` (the
+`--time-limit` and `--token-limit` options, stacked on that).
+`feat/refusal-counts` (1e) can merge at any time.
 
 The dry run cost $0, used no Docker and ran no real model. It ran a
 scripted mock model through the real command-line path, against a stand-in
