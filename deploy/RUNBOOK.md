@@ -63,6 +63,23 @@ password twice, and logs that login out everywhere:
 **Revoke access:** a workspace's own console (Keys page: revoke the key, or
 log out everywhere), or `scripts/revoke_key.py`.
 
+**Update the backup script.** A deploy doesn't touch `~/bin/`; copy the
+script over when it changes. It reads the age public key from `.env`
+(`AGE_PUBLIC_KEY`) and stops before dumping anything if it's missing, so add
+the key first:
+```bash
+grep -q '^AGE_PUBLIC_KEY=' .env || echo "add AGE_PUBLIC_KEY to .env first"
+install -m 700 deploy/backup_bookkeeping.sh ~/bin/backup_bookkeeping.sh
+~/bin/backup_bookkeeping.sh && ls ~/backups   # only .dump.age files
+```
+Then decrypt the newest one on the machine holding the private key (see
+Restore below) before trusting it.
+
+**Rotate the backup key:** make a new key pair off the server, set
+`AGE_PUBLIC_KEY` in `.env` to the new public key, and run the script once.
+Then prove a restore with the new private key, and only after that delete
+the old-key backups, locally and in S3.
+
 **Remove a stored connection** (for example one that no longer decrypts after
 the encryption key changed). There's no console button for this. Back up
 first, then run this to see what it would do, and add `--apply` to do it:
@@ -119,7 +136,7 @@ with, or the stored connection URLs can't be decrypted.
 6. **Public entry:** add `caddy-mcp.caddyfile` to the Caddy container's Caddyfile (its
    header has the validate-then-reload steps).
 7. **Demo database:** `bash deploy/setup_demo_database.sh`.
-8. **Backups:** copy `backup_bookkeeping.sh` to `~/bin/`, add the AWS/S3
+8. **Backups:** copy `backup_bookkeeping.sh` to `~/bin/`, add `AGE_PUBLIC_KEY` and the AWS/S3
    values to `.env`, `crontab deploy/crontab` (merge with any existing
    lines), run it once by hand.
 9. **Firewall:** add `DEPLOY_CADDY_CONTAINER` to `.env`, run

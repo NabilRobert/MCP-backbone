@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Nightly dump of the local MCP bookkeeping database. Keeps the last 14
-# locally, and an age-encrypted copy of the last 14 in S3 (off-server).
+# Nightly dump of the local MCP bookkeeping database, age-encrypted. Keeps
+# the last 14 encrypted copies locally and in S3 (off-server). The plaintext
+# dump is deleted as soon as it's encrypted, and on any failure.
 #
 # Deployed on the VPS as ~/bin/backup_bookkeeping.sh (see deploy/RUNBOOK.md), run by cron daily at
-# 03:17. Every secret comes from ~/MCP-backbone/.env at run time; nothing
-# sensitive lives in this file. The age public key below can only encrypt;
-# the matching private key is kept off the VPS.
+# 03:17. Every setting comes from ~/MCP-backbone/.env at run time, the age
+# public key included, so rotating the key never needs a code change and a
+# redeploy can't bring an old key back. The public key can only encrypt; the
+# matching private key is kept off the VPS.
 #
 # Alerting (optional): set BACKUP_HEALTHCHECK_URL in .env to a dead-man's-
 # switch check, e.g. a free healthchecks.io check scheduled daily. The
@@ -21,7 +23,11 @@ HC_URL="$(grep '^BACKUP_HEALTHCHECK_URL=' "$ENV_FILE" | cut -d= -f2- || true)"
 ping_hc() {
   if [ -n "$HC_URL" ]; then curl -fsS -m 10 --retry 3 "$HC_URL$1" >/dev/null || true; fi
 }
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then ping_hc /fail; fi' EXIT
+# Whatever happens, no plaintext dump (or half-written file) stays on disk.
+remove_plaintext() {
+  if [ -n "${OUT:-}" ]; then rm -f -- "$OUT" "$OUT.partial" "$OUT.age.partial"; fi
+}
+trap 'rc=$?; remove_plaintext; if [ "$rc" -ne 0 ]; then ping_hc /fail; fi' EXIT
 ping_hc /start
 
 require() {
@@ -37,16 +43,20 @@ AWS_KEY_ID="$(require AWS_ACCESS_KEY_ID)"
 AWS_SECRET="$(require AWS_SECRET_ACCESS_KEY)"
 S3_BUCKET="$(require S3_BUCKET)"
 S3_REGION="$(require S3_REGION)"
+AGE_PUBLIC_KEY="$(require AGE_PUBLIC_KEY)"
+
+# A run killed outright (SIGKILL, power loss) skips the trap, so clear any
+# plaintext an earlier run left behind before making a new one.
+rm -f -- "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.dump "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.partial
 
 OUT="$BACKUP_DIR/jarvis_mcp_bookkeeping-$(date +%Y%m%d-%H%M%S).dump"
 pg_dump "$DB_URL" --format=custom --file="$OUT.partial"
 mv "$OUT.partial" "$OUT"
 
-# Encrypt before it leaves the machine. The public key can only encrypt;
-# the private key lives off this VPS.
-AGE_PUBLIC_KEY="age1upeqgp4yylfausc24hsht4d0xzyay9pu0we64saqv4mx6azgyqgqknae43"
+# Encrypt before it leaves the machine, then delete the plaintext at once.
 age -r "$AGE_PUBLIC_KEY" -o "$OUT.age.partial" "$OUT"
 mv "$OUT.age.partial" "$OUT.age"
+rm -f -- "$OUT"
 
 # Credentials via env vars, not command-line args, so they don't show in ps.
 export RCLONE_S3_PROVIDER=AWS
@@ -60,7 +70,6 @@ REMOTE=":s3:$S3_BUCKET/bookkeeping"
 # Upload first, so a failed upload stops the script before any pruning.
 rclone copy "$OUT.age" "$REMOTE/"
 
-ls -1t "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.dump     | tail -n +15 | xargs -r rm --
 ls -1t "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.dump.age | tail -n +15 | xargs -r rm --
 
 # Prune remote copies, but only files this script created.
