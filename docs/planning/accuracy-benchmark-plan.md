@@ -1,7 +1,13 @@
 # Accuracy benchmark: plan
 
-Written 2026-11-04, before any work starts. Planning only: nothing here has
-been built or run. Decisions marked **(Arthur)** need his OK first.
+Written 2026-11-04, before any work starts. Decisions marked **(Arthur)**
+need his OK first.
+
+**Status (2026-11-05):** Arthur OK'd the plan. He chose all 70 tasks,
+qwen3.5:4b only, 5 tries per task, with no extra local models and no paid
+row. Step 1 is built in agent-eval-harness and dry-run with a scripted mock
+model at $0. Nothing has run against a real model. See "Built so far" at the
+end.
 
 "Project 13" below is Arthur's RL data-analyst environment. It is being
 renamed from flight-analysts to sql-analyst-env. Its answers to this plan's
@@ -25,7 +31,7 @@ things:
 |---|---|---|
 | Benchmark v1: 30 questions, `gpt-5-mini`, 29/30 strict | this repo: `docs/benchmark.md`, `scripts/run_benchmark.py`, `app/benchmark/` | The questions (now inside both task sets below) and the history. Its runner is superseded by the harness. |
 | agent-eval-harness: a 40-task Pagila suite | `agent-eval-harness`: `suites/pagila.yaml`, `agent_eval/` | Inspect AI runner, strict and lenient grading, pass^5, sourced prices and a budget cap, provenance, `publish` to RESULTS.md, and a regression gate for comparing runs |
-| Project 13's 70 public tasks | Project 13's repo: `tasks/public.yaml` | The harness's 40 plus 30 new ones, as 60 train and 10 dev tasks. Each has a checked answer key: it passes seven checks (C1 to C7), such as "the server accepts it" and "the likeliest wrong reading gives a different answer". Each also has a second key written differently, the likeliest wrong reading, an `is_ordered` flag, and a canary string. Five "tempting" tasks ask for a write. |
+| Project 13's 70 public tasks | Project 13's repo: `tasks/public.yaml` | The harness's 40 plus 30 new ones, as 60 train and 10 dev tasks. Each has a checked answer key: it passes seven checks (C1 to C7), such as "the server accepts it" and "the likeliest wrong reading gives a different answer". Each also has a second key written differently, the likeliest wrong reading, an `is_ordered` flag, and a canary string. Three "tempting" tasks (n44 to n46) ask for a write; two more are held out. |
 | Project 13's stack | Project 13's repo: `compose.yaml`, `stack/` | Postgres 16 in UTC, two perturbed copies of Pagila (A and B), MCP-backbone at a pinned commit, and one workspace per copy with raised limits. Keys are in `/out/keys.json` inside the stack. |
 | Project 13's local models | Ollama on this Mac | qwen3:1.7b, qwen3.5:4b and llama3.2:3b are already pulled and approved (~7 GB), with settings known to work: a 24,576-token context, replies capped at 4,096 tokens, sampling set explicitly |
 
@@ -151,10 +157,13 @@ grader agrees with all 212 of the harness's committed verdicts.
     lock);
   - the cost check;
   - the timeout.
+- **SQL the validator couldn't parse is not a refusal.** That's the agent's
+  syntax, not the server's judgement, so it's counted on its own line and
+  left out of the totals.
 - **Rate limits are not refusals.** The harness already marks those trials as
   errors, and the benchmark workspace has raised limits so they don't
   happen.
-- **On the 5 tempting tasks, a refusal is the right answer.** They are
+- **On the 3 tempting tasks, a refusal is the right answer.** They are
   reported on their own line: "write attempts refused: N of N".
 - **Every refusal on the other tasks is read by hand.** Was the query really
   unsafe or too costly (a correct refusal), or a legitimate read the server
@@ -276,12 +285,51 @@ public tasks:
 ## Open questions
 
 - **Arthur:**
-  - OK the plan.
-  - Decide on the paid reference row and its cap (D4).
-  - Decide whether to run the two extra local models (D4, D6).
+  - ~~OK the plan; the paid row; the two extra local models.~~ Answered
+    2026-11-05: OK'd, with neither the paid row nor the extra models.
+  - ~~The per-trial caps for the local run (D6).~~ Answered 2026-11-05:
+    600 s and 250,000 tokens. The harness's defaults (120 s and 60,000
+    tokens, a capped trial counting as a fail) were set for gpt-5-mini.
+    qwen3:1.7b averaged 1.7 minutes a try in Project 13, and qwen3.5:4b is
+    slower, so on the defaults many trials would fail on a cap, not on the
+    answer.
+    - The caps guard against runaways at $0. They aren't part of what's
+      measured, and the run's metadata records them.
+    - The dev run reports how many trials hit a cap. If more than a few
+      do, the caps are revisited before the full run, not after it.
   - Later, only if he wants it: a held-out figure, decided after Project 13's
     final records are committed. Project 13 recommends against it.
 - **Follow-up, separate and Arthur's call:** retire v1's runner
   (`scripts/run_benchmark.py`, `scripts/seed_eval_cases.py`, `app/benchmark/`
   and its tables) once v2 is published. The harness carries the same
   questions. `docs/journey.md` keeps the history.
+
+## Built so far (2026-11-05)
+
+Step 1 is in agent-eval-harness, in four PRs. Merge them in this order:
+`feat/ordered-result-match` (1d), then `feat/sql-analyst-env-benchmark`
+(1a to 1c, stacked on it), then `feat/trial-limit-options` (the
+`--time-limit` and `--token-limit` options, stacked on that).
+`feat/refusal-counts` (1e) can merge at any time.
+
+The dry run cost $0, used no Docker and ran no real model. It ran a
+scripted mock model through the real command-line path, against a stand-in
+for copy A:
+- `generate-expected` wrote all 70 tasks, keeping the canary, the commit
+  and the hash.
+- A run over the 10 dev tasks went through preflight, the budget, the
+  records and the report, and `publish` rendered the refusals table.
+- The refusals came out as scripted, by reason. The unparsable query was
+  counted on its own line, and the tempting task got its own line.
+
+What the dry run couldn't cover:
+- copy A's real answers;
+- a real Ollama model;
+- `/healthz`;
+- an ordered task through the command line. Unit tests cover that.
+
+Bug found and fixed in the harness: Inspect refused to price any model
+missing from its own database, which every Ollama model is. Without the fix,
+every local run would have stopped before its first trial.
+
+The commands for steps 2 to 4 are in `docs/benchmark.md`, under "v2".
