@@ -69,7 +69,8 @@ sequenceDiagram
    `app/auth/rate_limit.py: check_and_increment`: at most 5 queries per
    workspace per hour by default. It counts before the SQL is checked,
    so a query refused later still uses one up. Over the limit, the
-   request ends here as `rejected`.
+   request ends here as `rejected`. The count is one database upsert,
+   so two requests arriving together share one counter.
 6. **Is the SQL safe?** `app/query/service.py: _validate` calls
    `app/query/validation.py: validate_and_normalize`. It parses the SQL
    with sqlglot and requires exactly one `SELECT` (or `SELECT`s joined by

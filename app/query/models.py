@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.config import settings
@@ -89,3 +89,7 @@ class SchemaCache(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
     table_metadata_json: Mapped[str]
     cached_at: Mapped[datetime]
+
+    # One cache per workspace. schema_cache.py's upsert relies on it: two
+    # concurrent first lookups must share one row, not insert two.
+    __table_args__ = (UniqueConstraint("workspace_id", name="uq_schema_caches_workspace"),)

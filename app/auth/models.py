@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, Text
+from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.auth.scopes import ALL_TOOLS
@@ -111,6 +111,12 @@ class RateLimitCounter(Base):
     bucket: Mapped[str] = mapped_column(default="query", server_default="query")
     window_started_at: Mapped[datetime]
     count: Mapped[int] = mapped_column(default=0)
+
+    # One counter per allowance. rate_limit.py's upsert relies on it: two
+    # concurrent first requests must share one row, not insert two.
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "bucket", name="uq_rate_limit_counters_workspace_bucket"),
+    )
 
 
 class InviteCode(Base):

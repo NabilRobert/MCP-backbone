@@ -6,10 +6,12 @@ question over and over."""
 
 import datetime
 import json
+import uuid
 from typing import Any
 
 import anyio
 from sqlalchemy import inspect, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Inspector
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,8 +97,13 @@ async def get_table_metadata(
     metadata = await _fetch_live(data_source.connection_url)
     metadata_json = json.dumps(metadata)
     if cache is None:
-        session.add(
-            SchemaCache(workspace_id=workspace.id, table_metadata_json=metadata_json, cached_at=now)
+        # An upsert, not an add: two concurrent first lookups would
+        # otherwise insert two rows, and every later lookup would fail.
+        fresh = {"table_metadata_json": metadata_json, "cached_at": now}
+        await session.execute(
+            insert(SchemaCache)
+            .values(id=uuid.uuid4(), workspace_id=workspace.id, **fresh)
+            .on_conflict_do_update(index_elements=["workspace_id"], set_=fresh)
         )
     else:
         cache.table_metadata_json = metadata_json
