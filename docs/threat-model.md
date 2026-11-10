@@ -85,7 +85,10 @@ provides no protection here. **Confirmed by testing** (Phase 6 spike 1): a
 
 **Mitigation:** the validator rejects any function call sqlglot doesn't
 recognize as a named builtin (falls back to `exp.Anonymous`) unless
-explicitly allowlisted — the allowlist defaults to empty. sqlglot gives
+explicitly allowlisted. The allowlist holds only reviewed, read-only
+Postgres date/time builtins sqlglot doesn't model (`age`, `make_date`,
+`timezone`, ...), and only when called without a schema: `public.age(x)`
+is refused, since it could name a look-alike. sqlglot gives
 every common analytical function (`COUNT`, `COALESCE`, `DATE_TRUNC`, ...)
 its own node type, so this doesn't block legitimate queries; it blocks
 both user-defined functions and un-modeled builtins like `pg_sleep`
@@ -295,12 +298,14 @@ reads, not in the user's prompt).
 - **A user's own database credentials being over-privileged.** Signup
   warns when the supplied login can write or is a superuser, but accepts
   it: it's their database. The app-level validator still blocks writes.
-- **A target schema whose owner adds a dangerous `SECURITY DEFINER`
-  function *after* the allowlist and role are set up**, if that function
-  happens to also be given a name sqlglot recognizes as a safe builtin —
-  not possible today (recognized builtins are a fixed, closed set in
-  sqlglot, not extensible by a target database), but worth stating as the
-  boundary condition rather than assuming it away.
+- **A target schema whose owner adds a look-alike of a builtin's name**,
+  with different argument types: a `SECURITY DEFINER` `age(text)` or
+  `lower(integer)` in a schema on the search path. Postgres picks the
+  look-alike when the arguments match it better, so the validator, which
+  checks names only, can't tell (confirmed on Postgres, 2026-11-10). This
+  holds for allowlisted names and for every name sqlglot recognizes. The
+  `READ ONLY` transaction still refuses any write the look-alike tries, and
+  `statement_timeout` bounds its run time.
 - **Denial of service via sheer request volume** rather than per-query
   cost — covered only by the placeholder rate limit (Phase 2), not a real
   defense at production scale. A workspace the operator gives a larger

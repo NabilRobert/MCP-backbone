@@ -189,7 +189,7 @@ everywhere.
 | Validator | The code that decides whether SQL is a single, harmless `SELECT`. | `app/query/validation.py: validate_and_normalize` |
 | sqlglot, AST | sqlglot parses SQL into a tree (an AST), so we can check every part of it, not just the start. | `app/query/validation.py` |
 | CTE | A `WITH x AS (...)` sub-query. It can hide a write, so the validator searches the whole tree. | `app/query/validation.py: WRITE_NODE_TYPES` |
-| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The list is empty on purpose. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
+| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The only exceptions are read-only date/time builtins like `age()`, called without a schema. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
 | `SECURITY DEFINER` | A Postgres function that runs with its owner's rights, so it can write even when called by a read-only login. | `docs/threat-model.md` |
 | Cost check | Asking Postgres how expensive a query would be, and refusing it over a threshold. | `app/query/cost_check.py: check_cost` |
 | `EXPLAIN` | The Postgres command that returns a query's plan and estimated cost without running it. | `app/query/cost_check.py: check_cost` |
@@ -235,7 +235,10 @@ everywhere.
   takes `--query-rate-limit` and `--sample-rate-limit`.
 - **Allow a SQL function:** add its lower-case name to
   `ALLOWED_ANONYMOUS_FUNCTIONS` in `app/query/validation.py`, only after
-  checking it can't write. Add a test in `tests/test_validation.py`.
+  checking it can't write. Add its call to `READ_ONLY_DATE_TIME_CALLS` in
+  `tests/test_validation.py` (or a list like it) and to
+  `test_allowed_date_time_builtins_run_on_postgres` in
+  `tests/test_query_safety.py`.
 - **Add a tool:**
   1. Write the logic in `app/query/`.
   2. Add a scope constant to `app/auth/scopes.py` and to `ALL_TOOLS` and
