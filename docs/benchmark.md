@@ -1,6 +1,6 @@
 # Benchmark results
 
-## v2: 70 tasks, a local model (built, not run yet)
+## v2: 70 tasks, a local model
 
 v2 asks 70 business questions over a perturbed copy of Pagila ("copy A"):
 v1's 30 below, the harness's 10, and 30 new ones from Project 13
@@ -12,21 +12,93 @@ v1's 30 below, the harness's 10, and 30 new ones from Project 13
 The plan and its decisions are in
 [the accuracy benchmark plan](planning/accuracy-benchmark-plan.md).
 
-**Status (2026-11-05):** The runner is built in agent-eval-harness and has
-had a dry run with a scripted mock model at $0. There are no results yet.
-The real run waits for Project 13's overnight baselines and Arthur's go.
-- Model: `qwen3.5:4b` on Ollama, 5 tries per task, at about 10 to 15 hours.
-- Each trial is capped at 600 s and 250,000 tokens. The harness's defaults
-  are set for a fast paid model, and would fail a slow local one for running
-  out of time rather than for a wrong answer.
-- These figures won't be comparable with Project 13's, which grades on two
-  copies with its own runner.
+### Run 1 (2026-11-10): qwen3.5:4b
 
-**How it runs.** Run every command from the agent-eval-harness repo unless
+**Setup.**
+- **Model:** `qwen3.5:4b` on a local Ollama, 5 tries per task, 350 trials.
+- **Server:** this server at `7182b5c`, the first-use fix included.
+- **Limits:** each trial was capped at 600 s and 250,000 tokens, with the
+  harness's usual limit of 20 messages.
+- **Time:** it ran from 18:03 to 01:03 WIB, in 7 hours.
+- **Records:** the run is `bench-qwen3.5-4b` in agent-eval-harness, on
+  branch `eval/accuracy-benchmark-v2`, with every trial's tool calls and
+  rows.
+
+**Result: 224 of 350 trials (64.0%) answered correctly under strict
+grading,** and 228 (65.1%) leniently. There were no errors.
+- **Every try passed:** 28 of 70 tasks (pass^5, 40.0%).
+- **At least one try passed:** 61 of 70 tasks (87.1%).
+
+| Difficulty | Tasks | Strict | Stopped at 20 messages | Strict, of trials that finished |
+|---|---|---|---|---|
+| easy | 16 | 72/80 (90.0%) | 2 | 72/78 (92.3%) |
+| medium | 21 | 71/105 (67.6%) | 14 | 71/91 (78.0%) |
+| hard | 19 | 56/95 (58.9%) | 22 | 56/73 (76.7%) |
+| expert | 14 | 25/70 (35.7%) | 27 | 25/43 (58.1%) |
+| **all** | **70** | **224/350 (64.0%)** | **65** | **224/285 (78.6%)** |
+
+**Cost and time.**
+- **Cost:** $0, since the model runs locally.
+- **Tokens:** a median of 11,324 per trial, and at most 53,193.
+- **Time:** a median of 58 s per trial, 135 s at p90, and at most 278 s.
+- **Caps:** no trial came near the time or token cap.
+
+**Refusals: 91 of 714 queries (12.7%), in 57 of 350 trials.** I read every
+one, and all but one were right.
+
+| Refused | Why | Right? |
+|---|---|---|
+| 57 | A function Postgres doesn't have: SQLite's `strftime` (41), `julianday` (8) and `printf` (2), MySQL's `DATE_FORMAT` (3), and three made-up names | Yes. Postgres would fail them too |
+| 31 | A write on a tempting task (below) | Yes |
+| 1 | Two statements sent as one query | Yes |
+| 1 | The cost check: a cross join with no join condition | Yes |
+| 1 | `AGE(rental_date, LAG(rental_date) OVER (...))`, a valid read | **No: a false refusal** |
+
+- **The false refusal:** `age()` and nine other read-only date/time
+  builtins weren't on the validator's allowlist. Branch
+  `fix/allow-read-only-builtins` fixes this. That trial (x08) failed for
+  other reasons as well.
+- **Not counted as refusals:** 15 queries that sqlglot couldn't parse,
+  which is the model's syntax, not a refusal.
+- **Queries that errored:** 135 more queries were errors from Postgres
+  itself, such as unknown columns and type mismatches. None was a server
+  fault.
+
+**Tempting tasks: no write got through.** Three tasks ask for a write
+before a question (n44 to n46).
+- The model tried 34 writes across their 15 trials. The server refused 31,
+  and sqlglot couldn't parse the other 3, so none ran.
+- 4 of those 15 trials still passed, by answering the question without
+  the write.
+
+**Where the misses come from (126 trials).**
+- **The 20-message limit (65 misses):** the model was still exploring when
+  the limit hit. These cluster in the hard and expert tasks, in 29 of the 70
+  tasks. The limit is kept so runs stay comparable with every other
+  published run; the "of trials that finished" column shows its effect.
+- **A wrong final answer (61 misses):**
+  - wrong values (39);
+  - the right rows with extra ones (16), such as every category, ranked,
+    for "which category earned the most";
+  - no successful final query (3, all on tempting tasks);
+  - partly right rows, or an empty result (3).
+- **Never passed:** 9 tasks: h03, n32, n40, n44, x03, x04, x06, x08 and x10.
+
+**Not comparable with Project 13's figures.** Project 13 grades on two
+copies with its own runner. The harness lists this suite as "(subset)"
+because it isn't registered as frozen there. All 70 tasks ran. I've
+reported the label to the harness session.
+
+**Dev check (2026-11-09).** Before the full run, 10 dev tasks ran once
+each: 6 of 10 passed, with the same refusal pattern. It's published as
+`bench-dev-qwen3.5-4b`.
+
+**How it ran.** Run every command from the agent-eval-harness repo unless
 the step says otherwise. Run nothing while Project 13's stack is in use.
 
 1. In sql-analyst-env, start the stack with `docker compose up -d --wait`,
-   with its MCP-backbone pin moved to this repo's current `main`.
+   with its MCP-backbone pin set to the commit being measured (`7182b5c`
+   for run 1).
 2. Start the model server:
    `OLLAMA_CONTEXT_LENGTH=24576 OLLAMA_NUM_PARALLEL=1 ollama serve`.
 3. Build the answer key:
@@ -35,14 +107,14 @@ the step says otherwise. Run nothing while Project 13's stack is in use.
      wrong or its wrong answer grades right.
    - Commit the suite before the next step: a full run needs a clean
      checkout.
-4. Dev run: the 10 dev tasks, 5 tries each.
+4. Dev run: the 10 dev tasks, one try each.
    ```bash
-   uv run agent-eval run --suite suites/analyst-env.yaml --tasks n02,n07,n12,n19,n21,n27,n32,n36,n40,n46 --model ollama/qwen3.5:4b --epochs 5 --max-samples 1 --time-limit 600 --token-limit 250000 --budget 0.01 --run-id bench-dev-qwen3.5-4b
+   uv run agent-eval run --suite suites/analyst-env.yaml --tasks n02,n07,n12,n19,n21,n27,n32,n36,n40,n46 --model ollama/qwen3.5:4b --epochs 1 --max-samples 1 --time-limit 600 --token-limit 250000 --budget 0.01 --run-id bench-dev-qwen3.5-4b
    ```
    - It measures the time per try, and how many trials hit a cap.
    - Check its refusal counts against this server's audit log.
    - `--budget 0.01` rather than 0, because a local model is priced at $0.
-5. Full run: the same command without `--tasks`, with
+5. Full run: the same command without `--tasks`, with `--epochs 5` and
    `--run-id bench-qwen3.5-4b`. Run it overnight, with nothing else heavy
    running.
 6. Stop the stack with `docker compose down`, and put the pin back.

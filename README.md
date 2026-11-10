@@ -62,7 +62,9 @@ bypassing the validator: [red-team results](docs/red-team.md).
 questions over the demo database correctly under strict grading (exact
 columns and values), 30 of 30 leniently. Every miss across both runs is
 explained in the [benchmark report](docs/benchmark.md), including a tool fix and a
-question fix that came out of the first run.
+question fix that came out of the first run. On the 70-task v2 benchmark, a
+small local model (`qwen3.5:4b`, $0) answered 64% strictly, and none of its
+34 write attempts got through.
 
 ## Use it
 

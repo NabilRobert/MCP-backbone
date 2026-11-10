@@ -215,7 +215,7 @@ everywhere.
 | Alembic migration | A versioned script that changes the bookkeeping database's tables. | `migrations/versions/` |
 | Span, trace | OpenTelemetry's record of one timed step (span) and a whole request (trace). Off unless an endpoint is set. | `app/tracing.py: stage` |
 | Build version | The running git commit, shown by `/healthz`. | `app/version.py: BUILD_VERSION` |
-| Benchmark | Questions asked through the real tools, graded on the rows returned. v1 is 30 questions from this repo's own runner. v2 is 70 tasks run by agent-eval-harness, with refusals counted; it's built but not run yet. | v1: `scripts/run_benchmark.py: run`, `app/benchmark/grading.py`. v2: `docs/benchmark.md` and the harness repo |
+| Benchmark | Questions asked through the real tools, graded on the rows returned. v1 is 30 questions from this repo's own runner. v2 is 70 tasks run by agent-eval-harness, with refusals counted; its first run (qwen3.5:4b, 2026-11-10) scored 64% strict. | v1: `scripts/run_benchmark.py: run`, `app/benchmark/grading.py`. v2: `docs/benchmark.md` and the harness repo |
 | Red-team suite | Attacks on the safety layers. Some go through the real `run_query`; others skip the validator to prove the database refuses on its own. | `tests/test_red_team.py` |
 | Plugin | The Claude Code plugin: registers the server and a skill telling Claude how to use it. | `plugin/` |
 
