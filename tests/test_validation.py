@@ -110,3 +110,64 @@ def test_a_statement_that_isnt_a_query_is_rejected(sql: str) -> None:
     stops them. The first would undo the READ ONLY transaction."""
     with pytest.raises(QueryRejected, match="only SELECT statements are allowed"):
         validate_and_normalize(sql)
+
+
+# One call per name in ALLOWED_ANONYMOUS_FUNCTIONS, the way an analyst
+# would write it. tests/test_query_safety.py runs the same calls on Postgres.
+READ_ONLY_DATE_TIME_CALLS = [
+    "select age(returned_at, rented_at) from t",
+    "select age(rented_at) from t",
+    "select clock_timestamp()",
+    "select date_subtract(rented_at, interval '1 day') from t",
+    "select isfinite(rented_at) from t",
+    "select make_date(2024, 2, 29)",
+    "select make_timestamptz(2024, 2, 29, 12, 0, 0)",
+    "select statement_timestamp()",
+    "select timeofday()",
+    "select timezone('UTC', rented_at) from t",
+    "select transaction_timestamp()",
+]
+
+
+@pytest.mark.parametrize("sql", READ_ONLY_DATE_TIME_CALLS)
+def test_read_only_date_time_builtins_are_allowed(sql: str) -> None:
+    """sqlglot doesn't model these, so they parse as unknown functions,
+    which the validator used to refuse. age() was the case the v2
+    accuracy benchmark hit."""
+    validate_and_normalize(sql)  # must not raise
+
+
+def test_an_allowed_builtin_is_allowed_inside_another_function() -> None:
+    sql = "select extract(epoch from age(returned_at, rented_at)) from t"
+
+    assert "AGE(returned_at, rented_at)" in validate_and_normalize(sql)
+
+
+@pytest.mark.parametrize(
+    "sql", ["select public.age(rented_at) from t", "select pg_catalog.age(rented_at) from t"]
+)
+def test_an_allowed_builtin_called_with_a_schema_is_rejected(sql: str) -> None:
+    """The allowlist vouches for the builtin, not for a look-alike someone
+    created in another schema."""
+    with pytest.raises(QueryRejected, match="schema-qualified"):
+        validate_and_normalize(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select pg_sleep(1)",
+        "select set_config('default_transaction_read_only', 'off', false)",
+        "select nextval('demo_items_id_seq')",
+        "select current_setting('data_directory')",
+        "select pg_read_file('/etc/passwd')",
+        "select pg_advisory_lock(1)",
+        "select pg_terminate_backend(1)",
+        "select txid_current()",
+        "select lo_import('/etc/passwd')",
+        "select dblink('host=elsewhere', 'delete from t')",
+    ],
+)
+def test_builtins_with_side_effects_stay_rejected(sql: str) -> None:
+    with pytest.raises(QueryRejected, match="not on the allowlist"):
+        validate_and_normalize(sql)
