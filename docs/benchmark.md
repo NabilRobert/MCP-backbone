@@ -55,8 +55,9 @@ one, and all but one were right.
 | 1 | `AGE(rental_date, LAG(rental_date) OVER (...))`, a valid read | **No: a false refusal** |
 
 - **The false refusal:** `age()` and nine other read-only date/time
-  builtins weren't on the validator's allowlist. Branch
-  `fix/allow-read-only-builtins` fixes this. That trial (x08) failed for
+  builtins weren't on the validator's allowlist. They are now
+  (`ALLOWED_ANONYMOUS_FUNCTIONS` in `app/query/validation.py`), but this run
+  measured `7182b5c`, from before that fix. That trial (x08) failed for
   other reasons as well.
 - **Not counted as refusals:** 15 queries that sqlglot couldn't parse,
   which is the model's syntax, not a refusal.
