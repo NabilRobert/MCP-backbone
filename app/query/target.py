@@ -44,6 +44,12 @@ TARGET_NOT_ALLOWED = (
     "this workspace's database address is no longer allowed: "
     "it must resolve to a public internet address"
 )
+# For a failure that isn't Postgres's (a bug here, say): its text could be
+# anything, so the caller gets this and the server log gets the type.
+QUERY_FAILED_OUTSIDE_DATABASE = (
+    "the query failed inside this server, not in the database: "
+    "try again, and report it if it keeps happening"
+)
 
 
 class QueryExecutionError(Exception):
@@ -76,13 +82,38 @@ def is_connection_failure(exc: BaseException) -> bool:
 
 
 def caller_safe_error(exc: BaseException) -> str:
-    """The text to audit and return for a failed query. A database's own
-    error (an unknown column, say) helps the caller fix its SQL, so it
-    stays. A connection failure's text can name the host, so it doesn't."""
-    if not is_connection_failure(exc):
-        return str(exc)
-    logger.warning("target database connection failed: %s", exc)
-    return TARGET_UNREACHABLE
+    """The text to audit and return for a failed query. A connection
+    failure's text can name the host, so it becomes fixed text. Anything
+    else keeps only what Postgres itself said (see postgres_message)."""
+    if is_connection_failure(exc):
+        logger.warning("target database connection failed: %s", exc)
+        return TARGET_UNREACHABLE
+    if isinstance(exc, QueryExecutionError):
+        return str(exc)  # this module's own errors are written to be shown
+    # Debug only: SQLAlchemy's text quotes the query, which can hold
+    # whatever the caller typed, and the audit log already keeps the SQL.
+    logger.debug("a query failed", exc_info=exc)
+    return postgres_message(exc)
+
+
+def postgres_message(exc: BaseException) -> str:
+    """Postgres's own message, plus its hint when it gives one ("Perhaps
+    you meant to reference the column ..."): enough for the caller to fix
+    its SQL. SQLAlchemy's str(exc) would add the driver's class name, the
+    SQL as this server rewrote it (EXPLAIN included) and a link to
+    SQLAlchemy's docs, none of which help the caller. The detail field is
+    left out: it can quote row values, and a hint covers what a read needs."""
+    cause = asyncpg_cause(exc)
+    if not isinstance(cause, asyncpg.exceptions.PostgresError):
+        logger.warning("a query failed outside the database: %s", type(cause).__qualname__)
+        return QUERY_FAILED_OUTSIDE_DATABASE
+    # asyncpg sets these per error from the server's reply, so its classes
+    # don't declare them; getattr keeps the types honest.
+    message: str = getattr(cause, "message", "") or str(cause)
+    hint: str | None = getattr(cause, "hint", None)
+    if hint:
+        return f"{message} (hint: {hint})"
+    return message
 
 
 @asynccontextmanager

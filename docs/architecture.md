@@ -65,8 +65,9 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    `get_data_source` looks up which one a workspace may query and re-runs
    the address guard (`app/query/network_guard.py`) on it every time;
    `connect_to_target` opens a connection, and `caller_safe_error` decides
-   what a failure may say, so a driver's error text can't reach a caller
-   with the host in it.
+   what a failure may say: a broken connection gets fixed text, so the
+   host can't leak, and a failed query gets only Postgres's own message
+   and hint, without SQLAlchemy's wrapper.
 
 6. **`app/query/schema_cache.py`** — `describe_table` and `sample_rows`
    live here. They answer "what columns does this table have?" and
