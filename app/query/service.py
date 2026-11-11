@@ -21,6 +21,7 @@ from app.auth.models import Workspace
 from app.auth.rate_limit import RateLimitExceeded, allowance, check_and_increment
 from app.config import settings
 from app.query.cost_check import check_cost
+from app.query.lookalikes import LookalikeFunction, refuse_lookalikes
 from app.query.models import DataSourceConnection, QueryExecution
 from app.query.target import (
     QueryExecutionError,
@@ -236,8 +237,9 @@ async def _query_target(connection_url: str, normalized_sql: str) -> QueryOutcom
 async def _estimate_cost(conn: AsyncConnection, normalized_sql: str) -> float | QueryOutcome:
     """Step 3: how expensive would this query be? (see
     app/query/cost_check.py.) Returns the estimate, or the outcome that
-    ends the request: a rejection over the threshold, or an error (e.g.
-    EXPLAIN on a table that doesn't exist)."""
+    ends the request: a rejection over the threshold or for a look-alike
+    function (checked first: EXPLAIN can run one while planning), or an
+    error (e.g. EXPLAIN on a table that doesn't exist)."""
     with stage(
         "cost_check",
         kind=SpanKind.CLIENT,
@@ -248,9 +250,13 @@ async def _estimate_cost(conn: AsyncConnection, normalized_sql: str) -> float | 
         },
     ) as span:
         try:
+            await refuse_lookalikes(conn, normalized_sql)
             cost = await check_cost(
                 conn, normalized_sql, settings.cost_threshold, settings.explain_timeout_seconds
             )
+        except LookalikeFunction as exc:
+            mark_failed(span, "rejected_lookalike", exc.reason)
+            return QueryOutcome(status="rejected", error=exc.reason)
         except QueryRejected as exc:
             mark_failed(span, "rejected_by_cost", exc.reason)
             return QueryOutcome(status="rejected", error=exc.reason)
@@ -299,7 +305,12 @@ async def _run_with_retry(
                 await conn.execute(
                     text(f"SET LOCAL statement_timeout = {settings.query_timeout_seconds * 1000}")
                 )
+                # Again, in this transaction: a look-alike could have been
+                # created since the cost check's connection looked.
+                await refuse_lookalikes(conn, normalized_sql)
                 rows, is_truncated = await _fetch_capped(conn, normalized_sql)
+        except LookalikeFunction as exc:
+            return QueryOutcome(status="rejected", error=exc.reason, cost=cost), attempt
         except Exception as exc:  # noqa: BLE001 -- classified below, never silently swallowed
             if isinstance(asyncpg_cause(exc), asyncpg.exceptions.QueryCanceledError):
                 # The statement timeout kicked in. Never retried: the query

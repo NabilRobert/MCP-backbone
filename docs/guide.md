@@ -34,8 +34,8 @@ sequenceDiagram
     S->>Q: run_query(workspace, sql)
     Q->>B: rate-limit counter +1
     Q->>Q: validate SQL (sqlglot)
-    Q->>T: EXPLAIN (cost check)
-    Q->>T: run query (READ ONLY, timeout)
+    Q->>T: look-alike check, then EXPLAIN (cost check)
+    Q->>T: look-alike check, then run query (READ ONLY, timeout)
     Q->>B: write audit row
     Q-->>C: {status, rows, error}
 ```
@@ -81,13 +81,17 @@ sequenceDiagram
 7. **Is it too expensive?** `app/query/service.py: _query_target` opens
    a connection with `app/query/target.py: connect_to_target`, the one
    way every tool reaches a target. Every transaction on it is
-   `READ ONLY`. `app/query/service.py: _estimate_cost` calls
-   `app/query/cost_check.py: check_cost`, which asks Postgres for the
-   plan's cost with `EXPLAIN`, without running the query, under a
-   2-second timeout. Over 40,000, it's rejected.
+   `READ ONLY`. `app/query/service.py: _estimate_cost` first calls
+   `app/query/lookalikes.py: refuse_lookalikes`: if a function the query
+   calls has a look-alike on the target, the query is refused before
+   `EXPLAIN`, which can run a function while planning. Then
+   `app/query/cost_check.py: check_cost` asks Postgres for the plan's
+   cost with `EXPLAIN`, without running the query, under a 2-second
+   timeout. Over 40,000, it's rejected.
 8. **Run it.** `app/query/service.py: _execute` calls
    `app/query/service.py: _run_with_retry`, which takes a fresh connection
-   and sets a 5-second statement timeout. If the connection drops, it
+   and sets a 5-second statement timeout. It checks for look-alikes
+   again, in case one appeared since step 7. If the connection drops, it
    tries once more on a new connection. It never retries a query that
    was just slow. `app/query/service.py: _fetch_capped` reads at most
    200 rows.
@@ -193,8 +197,9 @@ everywhere.
 | Validator | The code that decides whether SQL is a single, harmless `SELECT`. | `app/query/validation.py: validate_and_normalize` |
 | sqlglot, AST | sqlglot parses SQL into a tree (an AST), so we can check every part of it, not just the start. | `app/query/validation.py` |
 | CTE | A `WITH x AS (...)` sub-query. It can hide a write, so the validator searches the whole tree. | `app/query/validation.py: WRITE_NODE_TYPES` |
-| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The only exceptions are read-only date/time builtins like `age()`, called without a schema. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
+| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The only exceptions are read-only date/time builtins like `age()`, called without a schema or quotes. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
 | `SECURITY DEFINER` | A Postgres function that runs with its owner's rights, so it can write even when called by a read-only login. | `docs/threat-model.md` |
+| Look-alike function | A function outside `pg_catalog` with a builtin's name, such as `public.age(text)`. Postgres calls it instead of the builtin when its argument types fit better, so a query that calls one is refused. Functions of an extension a superuser owns don't count. | `app/query/lookalikes.py: refuse_lookalikes` |
 | Cost check | Asking Postgres how expensive a query would be, and refusing it over a threshold. | `app/query/cost_check.py: check_cost` |
 | `EXPLAIN` | The Postgres command that returns a query's plan and estimated cost without running it. | `app/query/cost_check.py: check_cost` |
 | Statement timeout | A Postgres setting that kills a query after N seconds. Set per transaction with `SET LOCAL`. | `app/query/service.py: _run_with_retry` |
@@ -244,6 +249,9 @@ everywhere.
   `tests/test_validation.py` (or a list like it) and to
   `test_allowed_date_time_builtins_run_on_postgres` in
   `tests/test_query_safety.py`.
+- **Change what counts as a look-alike:** edit `FIND_LOOKALIKE` in
+  `app/query/lookalikes.py`, the tests in `tests/test_lookalikes.py`,
+  and the look-alike section of `docs/threat-model.md`.
 - **Add a tool:**
   1. Write the logic in `app/query/`.
   2. Add a scope constant to `app/auth/scopes.py` and to `ALL_TOOLS` and

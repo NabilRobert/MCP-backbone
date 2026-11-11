@@ -94,7 +94,12 @@ user's function (sqlglot writes a quoted name back upper-cased, as
 every common analytical function (`COUNT`, `COALESCE`, `DATE_TRUNC`, ...)
 its own node type, so this doesn't block legitimate queries; it blocks
 both user-defined functions and un-modeled builtins like `pg_sleep`
-(itself a resource-exhaustion vector, also caught by this rule).
+(itself a resource-exhaustion vector, also caught by this rule). A name
+check alone can't tell a builtin from a same-named function in another
+schema, so `app/query/lookalikes.py` also asks the target, before
+`EXPLAIN` and again before the query runs, whether any function the
+query calls exists outside `pg_catalog` on the search path, and refuses
+the query if so (see "What this does *not* defend against" for what's left).
 
 **Residual risk, stated plainly:** `REVOKE EXECUTE ... FROM PUBLIC`
 (also run by the provisioning script) only protects functions that exist
@@ -300,14 +305,26 @@ reads, not in the user's prompt).
 - **A user's own database credentials being over-privileged.** Signup
   warns when the supplied login can write or is a superuser, but accepts
   it: it's their database. The app-level validator still blocks writes.
-- **A target schema whose owner adds a look-alike of a builtin's name**,
-  with different argument types: a `SECURITY DEFINER` `age(text)` or
-  `lower(integer)` in a schema on the search path. Postgres picks the
-  look-alike when the arguments match it better, so the validator, which
-  checks names only, can't tell (confirmed on Postgres, 2026-11-10). This
-  holds for allowlisted names and for every name sqlglot recognizes. The
-  `READ ONLY` transaction still refuses any write the look-alike tries, and
-  `statement_timeout` bounds its run time.
+- **A look-alike created in the instant between the check and the
+  query.** A schema owner can add a function with a builtin's name and
+  different argument types (`age(text)`, `lower(integer)`), and Postgres
+  picks it over the builtin when the arguments fit it better, even with
+  `pg_catalog` first on the search path (confirmed on Postgres 16). That
+  gap is closed for functions: `app/query/lookalikes.py` refuses any
+  query calling a name that also exists outside `pg_catalog` on the
+  search path, before `EXPLAIN` and again in the transaction that runs
+  the query. What's left is the moment between that check and the
+  query in the same transaction. The `READ ONLY` transaction still
+  refuses any write such a function tries, and `statement_timeout`
+  bounds its run time.
+- **Look-alike operators.** The same overloading works for operators (a
+  `public.+` on new argument types), and these aren't checked. The same
+  `READ ONLY` and timeout backstops apply.
+- **Functions of an extension a superuser owns are trusted**, so a
+  database with citext can still use `replace()` and `max()`. Only a
+  superuser can add a function to such an extension. An extension a
+  database owner installed themself gets no exemption, since they could
+  add their own look-alike to it.
 - **Denial of service via sheer request volume** rather than per-query
   cost — covered only by the placeholder rate limit (Phase 2), not a real
   defense at production scale. A workspace the operator gives a larger

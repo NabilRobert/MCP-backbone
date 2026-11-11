@@ -49,6 +49,11 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    expensive would this be?" (via `EXPLAIN`) without actually running
    it, and rejects it if the estimate is too high.
 
+   **`app/query/lookalikes.py`** runs on the target just before that,
+   and again before the real run: it refuses a query when a function it
+   calls also exists outside `pg_catalog` on the search path, since
+   Postgres could pick that look-alike over the builtin.
+
 5. **`app/query/service.py`** — "actually run it." This is where
    `run_query` and `list_tables` live for real. It ties the above two
    checks together, adds a timeout so a slow query gets killed rather
