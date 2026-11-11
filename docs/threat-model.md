@@ -87,8 +87,10 @@ provides no protection here. **Confirmed by testing** (Phase 6 spike 1): a
 recognize as a named builtin (falls back to `exp.Anonymous`) unless
 explicitly allowlisted. The allowlist holds only reviewed, read-only
 Postgres date/time builtins sqlglot doesn't model (`age`, `make_date`,
-`timezone`, ...), and only when called without a schema: `public.age(x)`
-is refused, since it could name a look-alike. sqlglot gives
+`timezone`, ...), and only when called without a schema or quotes:
+`public.age(x)` and `"age"(x)` are refused, since either could name a
+user's function (sqlglot writes a quoted name back upper-cased, as
+`"AGE"`, which no builtin is called). sqlglot gives
 every common analytical function (`COUNT`, `COALESCE`, `DATE_TRUNC`, ...)
 its own node type, so this doesn't block legitimate queries; it blocks
 both user-defined functions and un-modeled builtins like `pg_sleep`

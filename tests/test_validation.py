@@ -153,6 +153,14 @@ def test_an_allowed_builtin_called_with_a_schema_is_rejected(sql: str) -> None:
         validate_and_normalize(sql)
 
 
+@pytest.mark.parametrize("sql", ['select "age"(now())', 'select "AGE"(now())'])
+def test_an_allowed_builtin_called_by_a_quoted_name_is_rejected(sql: str) -> None:
+    """Quoting makes Postgres match the case exactly, and sqlglot writes the
+    name back as "AGE": no builtin is called that, only a user's function."""
+    with pytest.raises(QueryRejected, match="quoted"):
+        validate_and_normalize(sql)
+
+
 @pytest.mark.parametrize(
     "sql",
     [

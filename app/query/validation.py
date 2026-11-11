@@ -134,9 +134,15 @@ def _reject_unless_allowed(func: exp.Anonymous) -> None:
     in ALLOWED_ANONYMOUS_FUNCTIONS. A schema-qualified call (public.age,
     parsed as a Dot whose right side is the call) is refused even for an
     allowed name: the allowlist vouches for the builtin, not for a
-    look-alike someone created in another schema."""
+    look-alike someone created in another schema. So is a quoted name
+    ("age"): quoting makes Postgres match the case exactly, and sqlglot
+    writes it back as "AGE", which only a user's function can be named."""
     if (func.name or "").lower() not in ALLOWED_ANONYMOUS_FUNCTIONS:
         raise QueryRejected(f"function '{func.name}' is not on the allowlist")
+    if isinstance(func.this, exp.Identifier) and func.this.quoted:
+        raise QueryRejected(
+            f"function '\"{func.name}\"' is quoted: call an allowed builtin without quotes"
+        )
     parent = func.parent
     if isinstance(parent, exp.Dot) and parent.expression is func:
         qualified_name = parent.sql(dialect="postgres").split("(", 1)[0]
