@@ -6,8 +6,9 @@ need his OK first.
 **Status (2026-11-05):** Arthur OK'd the plan. He chose all 70 tasks,
 qwen3.5:4b only, 5 tries per task, with no extra local models and no paid
 row. Step 1 is built in agent-eval-harness and dry-run with a scripted mock
-model at $0. Nothing has run against a real model. See "Built so far" at the
-end.
+model at $0. See "Built so far" at the end. **Run 1 happened on 2026-11-10**:
+64.0% strict, with one false refusal (`age()`). The results are in
+[the benchmark report](../benchmark.md).
 
 "Project 13" below is Arthur's RL data-analyst environment. It is being
 renamed from flight-analysts to sql-analyst-env. Its answers to this plan's

@@ -20,7 +20,27 @@ WRITE_NODE_TYPES = (exp.Insert, exp.Update, exp.Delete, exp.Into, exp.Create, ex
 # DEFINER write slips past a "single SELECT" check. Default to rejecting
 # all of them; add a name here only for a specific, reviewed, known-safe
 # case.
-ALLOWED_ANONYMOUS_FUNCTIONS: frozenset[str] = frozenset()
+#
+# The names below are Postgres date/time builtins (docs section 9.9) that
+# sqlglot happens not to model. Each only computes a value from its
+# arguments or the clock: none writes, sleeps, locks, or reads files or
+# server settings. age() was refused in the v2 accuracy benchmark's dev
+# check (2026-11-09); the rest are the neighbours sqlglot also misses.
+# Only unqualified calls match (see _reject_unless_allowed).
+ALLOWED_ANONYMOUS_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "age",
+        "clock_timestamp",
+        "date_subtract",
+        "isfinite",
+        "make_date",
+        "make_timestamptz",
+        "statement_timestamp",
+        "timeofday",
+        "timezone",
+        "transaction_timestamp",
+    }
+)
 
 # If a query doesn't already say how many rows to return, we cap it at
 # this many -- stops one accidental "give me everything" query from
@@ -99,9 +119,7 @@ def validate_and_normalize(sql: str) -> str:
     # Since we can't inspect what every possible function actually
     # does, we default to refusing anything we don't recognize by name.
     for func in statement.find_all(exp.Anonymous):
-        name = (func.name or "").lower()
-        if name not in ALLOWED_ANONYMOUS_FUNCTIONS:
-            raise QueryRejected(f"function '{func.name}' is not on the allowlist")
+        _reject_unless_allowed(func)
 
     # All checks passed. One last adjustment: if the query doesn't
     # already limit how many rows it returns, add that limit ourselves.
@@ -109,3 +127,20 @@ def validate_and_normalize(sql: str) -> str:
         statement = statement.limit(DEFAULT_LIMIT)
 
     return statement.sql(dialect="postgres")
+
+
+def _reject_unless_allowed(func: exp.Anonymous) -> None:
+    """Raises QueryRejected unless `func` is an unqualified call to a name
+    in ALLOWED_ANONYMOUS_FUNCTIONS. A schema-qualified call (public.age,
+    parsed as a Dot whose right side is the call) is refused even for an
+    allowed name: the allowlist vouches for the builtin, not for a
+    look-alike someone created in another schema."""
+    if (func.name or "").lower() not in ALLOWED_ANONYMOUS_FUNCTIONS:
+        raise QueryRejected(f"function '{func.name}' is not on the allowlist")
+    parent = func.parent
+    if isinstance(parent, exp.Dot) and parent.expression is func:
+        qualified_name = parent.sql(dialect="postgres").split("(", 1)[0]
+        raise QueryRejected(
+            f"function '{qualified_name}' is schema-qualified: "
+            "call an allowed builtin without a schema"
+        )

@@ -43,6 +43,34 @@ async def test_disallowed_function_is_rejected(
     assert "pg_sleep" in (result["error"] or "")
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        "age(timestamp '2024-03-01', timestamp '2024-01-15')",
+        "age(timestamp '2024-01-15')",
+        "clock_timestamp()",
+        "date_subtract(timestamptz '2024-03-01', interval '1 day')",
+        "isfinite(timestamp '2024-03-01')",
+        "make_date(2024, 2, 29)",
+        "make_timestamptz(2024, 2, 29, 12, 0, 0)",
+        "statement_timestamp()",
+        "timeofday()",
+        "timezone('UTC', timestamptz '2024-03-01')",
+        "transaction_timestamp()",
+    ],
+)
+async def test_allowed_date_time_builtins_run_on_postgres(
+    db_session: AsyncSession, seeded_workspace: tuple[Workspace, str], call: str
+) -> None:
+    """Allowing a name is only half the job: sqlglot rewrites the SQL, and
+    Postgres has to accept what comes out."""
+    workspace, _ = seeded_workspace
+
+    result = await run_query(db_session, workspace, f"select {call} as value")
+
+    assert result["status"] == "succeeded", result["error"]
+
+
 async def test_multi_statement_is_rejected(
     db_session: AsyncSession, seeded_workspace: tuple[Workspace, str]
 ) -> None:
