@@ -107,7 +107,11 @@ connection gets one fixed message (`app/query/target.py: caller_safe_error`),
 and the details go to the server log. Anything we didn't expect is caught
 by `app/mcp/server.py: _translate_errors` and handled the same way. A
 database's own error, like an unknown column, is passed on, because it
-helps the model fix its SQL.
+helps the model fix its SQL. Only Postgres's message and hint go
+(`app/query/target.py: postgres_message`), for example `column "labl"
+does not exist (hint: Perhaps you meant to reference the column
+"demo_items.label".)`. SQLAlchemy's wrapper around it (the driver's class,
+the query as rewritten here, a docs link) is logged at debug level only.
 
 ### The other three tools
 
@@ -199,6 +203,7 @@ everywhere.
 | Row cap | At most 200 rows go back to the model; more are cut off with a note. | `app/query/service.py: _fetch_capped` |
 | Rate limit | At most N calls per workspace per hour. A fixed window: the count resets when the hour is up. Counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
 | Audit log | One `QueryExecution` row per attempt, refused or not. The console shows it. | `app/query/service.py: write_audit` |
+| Caller-safe error | What a failed query may tell the caller and the audit log: fixed text for a broken connection, otherwise only Postgres's message and hint. | `app/query/target.py: caller_safe_error` |
 | `QueryOutcome` | How one attempt ended: status, reason, cost, rows. | `app/query/service.py: QueryOutcome` |
 | Schema cache | A 5-minute copy of table and column names, for the browsing tools only. | `app/query/schema_cache.py: get_table_metadata` |
 | Network guard | Refuses a database URL that points at a private or local address (SSRF protection). | `app/query/network_guard.py: ensure_public_target` |
