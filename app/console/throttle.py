@@ -16,6 +16,7 @@ limits exposure is the short retention."""
 
 import datetime
 import hashlib
+import uuid
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,11 +33,9 @@ def _key(client_ip: str) -> str:
     return hashlib.sha256(client_ip.encode()).hexdigest()
 
 
-async def is_blocked(
-    session: AsyncSession, bucket: str, client_ip: str, max_events: int, window_seconds: int
-) -> bool:
+async def _count(session: AsyncSession, bucket: str, client_ip: str, window_seconds: int) -> int:
     since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=window_seconds)
-    count = (
+    return (
         await session.execute(
             select(func.count(ThrottleEvent.id)).where(
                 ThrottleEvent.bucket == bucket,
@@ -45,13 +44,45 @@ async def is_blocked(
             )
         )
     ).scalar_one()
-    return count >= max_events
 
 
-async def record(session: AsyncSession, bucket: str, client_ip: str) -> None:
+async def is_blocked(
+    session: AsyncSession, bucket: str, client_ip: str, max_events: int, window_seconds: int
+) -> bool:
+    return await _count(session, bucket, client_ip, window_seconds) >= max_events
+
+
+async def claim_attempt(
+    session: AsyncSession, bucket: str, client_ip: str, max_events: int, window_seconds: int
+) -> uuid.UUID | None:
+    """Counts an attempt BEFORE it's checked, for a limit that parallel
+    requests mustn't slip past. Checking first and recording after a
+    failure let every request sent at once pass the check before any
+    failure was recorded. Here each attempt is committed, then counted:
+    the k-th to commit sees at least k, so at most max_events get through.
+
+    Returns the attempt's id, to forget() if it succeeds, or None if over
+    the limit (that attempt is forgotten at once, so blocked tries don't
+    extend the lockout)."""
+    attempt_id = await record(session, bucket, client_ip)
+    if await _count(session, bucket, client_ip, window_seconds) <= max_events:
+        return attempt_id
+    await forget(session, attempt_id)
+    return None
+
+
+async def forget(session: AsyncSession, attempt_id: uuid.UUID) -> None:
+    """Removes one claimed attempt: it succeeded, so it isn't a failure."""
+    await session.execute(delete(ThrottleEvent).where(ThrottleEvent.id == attempt_id))
+    await session.commit()
+
+
+async def record(session: AsyncSession, bucket: str, client_ip: str) -> uuid.UUID:
     """Records one event and prunes everything past retention, so the
     table never holds more than a day of (hashed) addresses."""
     now = datetime.datetime.now(datetime.UTC)
     await session.execute(delete(ThrottleEvent).where(ThrottleEvent.created_at < now - _RETENTION))
-    session.add(ThrottleEvent(bucket=bucket, key=_key(client_ip), created_at=now))
+    event = ThrottleEvent(id=uuid.uuid4(), bucket=bucket, key=_key(client_ip), created_at=now)
+    session.add(event)
     await session.commit()
+    return event.id

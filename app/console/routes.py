@@ -5,6 +5,7 @@ ApiKey status) -- the console adds no new capability, just a way to
 see it in a browser."""
 
 import datetime
+import uuid
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -80,8 +81,10 @@ def _client_ip(request: Request) -> str:
 _TOO_MANY_ATTEMPTS = "Too many failed attempts. Try again in a few minutes."
 
 
-async def _login_blocked(session: AsyncSession, ip: str) -> bool:
-    return await throttle.is_blocked(
+async def _claim_login_attempt(session: AsyncSession, ip: str) -> uuid.UUID | None:
+    """Counts this login or signup attempt as a failure until it succeeds
+    (see throttle.claim_attempt). None means the client is locked out."""
+    return await throttle.claim_attempt(
         session,
         throttle.LOGIN,
         ip,
@@ -103,18 +106,19 @@ async def login_submit(
     session: AsyncSession = Depends(get_session),
 ):
     ip = _client_ip(request)
-    # Checked before the password is even looked at, so a locked-out
+    # Counted before the password is even looked at, so a locked-out
     # client learns nothing more, not even whether a guess was right.
-    if await _login_blocked(session, ip):
+    attempt_id = await _claim_login_attempt(session, ip)
+    if attempt_id is None:
         return templates.TemplateResponse(
             request, "login.html", {"error": _TOO_MANY_ATTEMPTS}, status_code=429
         )
     workspace = await verify_console_login(session, username, password)
     if workspace is None:
-        await throttle.record(session, throttle.LOGIN, ip)
         return templates.TemplateResponse(
             request, "login.html", {"error": "Incorrect username or password."}
         )
+    await throttle.forget(session, attempt_id)
     await log_in(request, session, workspace)
     return RedirectResponse("/console/", status_code=303)
 
@@ -134,17 +138,18 @@ async def signup_submit(
 ):
     ip = _client_ip(request)
     context = {"min_password": MIN_PASSWORD_LENGTH, "username": form.username}
-    if await _login_blocked(session, ip):
+    attempt_id = await _claim_login_attempt(session, ip)
+    if attempt_id is None:
         return templates.TemplateResponse(
             request, "signup.html", {**context, "error": _TOO_MANY_ATTEMPTS}, status_code=429
         )
     try:
         result = await sign_up(session, form, ip)
     except SignupError as exc:
-        await throttle.record(session, throttle.LOGIN, ip)
         return templates.TemplateResponse(
             request, "signup.html", {**context, "error": str(exc)}, status_code=400
         )
+    await throttle.forget(session, attempt_id)
 
     await log_in(request, session, result.workspace)
     # Rendered directly, not redirected: like a rotated key, the new

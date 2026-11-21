@@ -141,14 +141,18 @@ the query as rewritten here, a docs link) is logged at debug level only.
    `app/console/csrf.py: csrf_token`.
 2. `POST /console/login` first passes
    `app/console/csrf.py: verify_csrf`, which runs on every console POST.
-3. `app/console/routes.py: login_submit` checks the per-IP lockout
-   (`app/console/throttle.py: is_blocked`), then
-   `app/console/auth.py: verify_console_login`. That checks the password
-   with Argon2 (`app/auth/security.py: verify_password`) and upgrades an
-   old hash if needed.
-4. On success, `app/console/auth.py: log_in` stores the workspace in the
-   signed session cookie. A failure is recorded
-   (`app/console/throttle.py: record`).
+3. `app/console/routes.py: login_submit` counts the attempt as a
+   failure first (`app/console/throttle.py: claim_attempt`), and refuses
+   it if that puts the IP over the lockout limit. Counting before
+   checking means guesses sent all at once can't slip past. Then
+   `app/console/auth.py: verify_console_login` checks the password with
+   Argon2 in a worker thread
+   (`app/auth/security.py: verify_password_in_thread`), so a slow hash
+   doesn't stall other requests, and upgrades an old hash if needed.
+4. On success, the attempt's count is taken back
+   (`app/console/throttle.py: forget`), and
+   `app/console/auth.py: log_in` stores the workspace in the signed
+   session cookie.
 5. Later pages declare `app/console/routes.py: require_login`. Without a
    login it raises `LoginRequired`, and
    `app/console/routes.py: redirect_to_login` sends the browser back to
@@ -221,7 +225,7 @@ everywhere.
 | Argon2 | A slow, memory-hard password hash. Older scrypt hashes are upgraded at login. | `app/auth/security.py: hash_password` |
 | CSRF | A trick where another site makes your browser submit a form. Every console form carries a token to stop it. | `app/console/csrf.py: verify_csrf` |
 | Session cookie | The signed cookie that remembers a console login. | `app/main.py`, `app/console/auth.py: log_in` |
-| Throttle | Per-IP limits on failed logins, failed signups and demo signups. | `app/console/throttle.py: is_blocked` |
+| Throttle | Per-IP limits on failed logins, failed signups and demo signups. Login and signup attempts are counted before they're checked, so parallel guesses can't pass the limit. | `app/console/throttle.py: claim_attempt` |
 | Invite code | A single-use code that lets someone connect their own database at signup. | `app/auth/signup.py: create_invite` |
 | Alembic migration | A versioned script that changes the bookkeeping database's tables. | `migrations/versions/` |
 | Span, trace | OpenTelemetry's record of one timed step (span) and a whole request (trace). Off unless an endpoint is set. | `app/tracing.py: stage` |

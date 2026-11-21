@@ -227,8 +227,10 @@ compromise.
 own allowance. Before this, it could read the first 100 rows of every
 table, as often as the caller liked, and leave no trace. Console login
 and signup lock out a client IP after repeated failures
-(`app/console/throttle.py`). The counts live in the database, so a
-restart doesn't reset them. Only a SHA-256 of the IP is stored, pruned
+(`app/console/throttle.py`). Each attempt is counted before the
+password is checked, so guesses sent in parallel can't all pass the
+check before the first failure is recorded (a review found they could).
+The counts live in the database, so a restart doesn't reset them. Only a SHA-256 of the IP is stored, pruned
 after a day: pseudonymous rather than anonymous, since IPv4 hashes can be
 brute-forced, so the short retention is what limits exposure. Console
 sessions are signed cookies stamped with a per-login version, so "log out
