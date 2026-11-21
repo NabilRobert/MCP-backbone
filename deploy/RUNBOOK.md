@@ -199,7 +199,8 @@ with, or the stored connection URLs can't be decrypted.
    values to `.env`, `crontab deploy/crontab` (merge with any existing
    lines), run it once by hand.
 9. **Firewall:** add `DEPLOY_CADDY_CONTAINER` to `.env`, run
-   `bash deploy/firewall.sh`, then test SSH from outside and
-   cancel its safety timer.
+   `bash deploy/firewall.sh`. It only adds this project's rules, so it's
+   safe to re-run on the shared server. If it had to turn ufw on, test SSH
+   from outside and cancel its safety timer.
 10. **Check:** `/healthz` is 200 from outside, a signup works, and a
     `list_tables` through the plugin answers.

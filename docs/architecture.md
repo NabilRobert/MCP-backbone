@@ -260,9 +260,11 @@ setting things up:
   `APP_TARGET_DATABASE_URL` at it. Stops before touching the app if any
   check fails.
 - **`crontab`** — the one cron line that runs the nightly backup.
-- **`firewall.sh`** — the host firewall (ufw): 22/80/443 open, 8443 only
-  from Caddy's Docker network, everything else dropped. Schedules its own
-  undo before enabling, and rolls back if Caddy loses the app.
+- **`firewall.sh`** — this project's host firewall rules (ufw): 22/80/443
+  open, 8443 only from Caddy's Docker network. It adds only its own rules,
+  tagged `mcp-backbone`, so other projects' rules on the shared server
+  stay. If ufw is off, it sets deny-incoming, schedules its own undo
+  before enabling, and rolls back if Caddy loses the app.
 - **`RUNBOOK.md`** — routine operations, monitoring setup, restore, and a
   rebuild-from-nothing checklist.
 
