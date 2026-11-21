@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # Most rows run_query returns. The cost check bounds how expensive a
     # query is, not how big its result is; this bounds what reaches the AI.
     max_result_rows: int = 200
+    # And the most bytes, in all and per text value: one row can be huge
+    # (app/query/result_cap.py). 1 MB is far more than any Pagila answer
+    # of 200 rows (a few tens of KB) and far less than the server can hold.
+    max_result_bytes: int = 1_000_000
+    max_value_bytes: int = 10_000
     demo_rate_limit: int = 5  # max run_query calls per workspace per window
     demo_rate_limit_window_seconds: int = 3600  # how long that window is
     # sample_rows returns real data too, so it's audited and limited as

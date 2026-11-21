@@ -112,7 +112,7 @@ async def test_run_query_caps_result_rows(
     assert big["status"] == "succeeded"
     assert len(big["rows"]) == 50
     assert big["truncated"] is True
-    assert "first 50 rows" in big["note"]
+    assert "at most 50 rows" in big["note"]
 
     exact = await run_query(db_session, workspace, "select * from demo_items limit 50")
     assert len(exact["rows"]) == 50

@@ -54,6 +54,10 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    calls also exists outside `pg_catalog` on the search path, since
    Postgres could pick that look-alike over the builtin.
 
+   **`app/query/result_cap.py`** reads the real run's result and stops
+   at 200 rows or 1 MB, shortening any text value over 10 KB, since one
+   cheap query can still return a huge answer.
+
 5. **`app/query/service.py`** — "actually run it." This is where
    `run_query` and `list_tables` live for real. It ties the above two
    checks together, adds a timeout so a slow query gets killed rather

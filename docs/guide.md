@@ -93,8 +93,8 @@ sequenceDiagram
    and sets a 5-second statement timeout. It checks for look-alikes
    again, in case one appeared since step 7. If the connection drops, it
    tries once more on a new connection. It never retries a query that
-   was just slow. `app/query/service.py: _fetch_capped` reads at most
-   200 rows.
+   was just slow. `app/query/result_cap.py: fetch_capped` reads at most
+   200 rows and 1 MB, and shortens any text value over 10 KB.
 9. **Audit, then answer.** `app/query/service.py: _finish` calls
    `app/query/service.py: write_audit`, which saves one `QueryExecution`
    row (the audit log), and only then returns the result. If the audit
@@ -205,7 +205,8 @@ everywhere.
 | Statement timeout | A Postgres setting that kills a query after N seconds. Set per transaction with `SET LOCAL`. | `app/query/service.py: _run_with_retry` |
 | `READ ONLY` transaction | Postgres refuses every write in it, even from a `SECURITY DEFINER` function. | `app/db.py: create_target_engine` |
 | Read-only role | A database login that can only `SELECT`. A second guard behind the transaction. | `scripts/provision_readonly_role.py` |
-| Row cap | At most 200 rows go back to the model; more are cut off with a note. | `app/query/service.py: _fetch_capped` |
+| Row cap, byte cap | At most 200 rows and 1 MB go back to the model, and a text value over 10 KB is shortened; a cut result says so with a note. | `app/query/result_cap.py: fetch_capped` |
+| Length ceiling | `repeat()`, `lpad()` and `rpad()` may build at most 1,000 characters, given as a plain number, so one call can't build a huge string. | `app/query/validation.py: MAX_GENERATED_LENGTH` |
 | Rate limit | At most N calls per workspace per hour. A fixed window: the count resets when the hour is up. Counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
 | Audit log | One `QueryExecution` row per attempt, refused or not. The console shows it. | `app/query/service.py: write_audit` |
 | Caller-safe error | What a failed query may tell the caller and the audit log: fixed text for a broken connection, otherwise only Postgres's message and hint. | `app/query/target.py: caller_safe_error` |
@@ -237,7 +238,8 @@ everywhere.
   test database from the README).
 - **Change a limit:** set it in `.env`. Each has a comment in
   `.env.example`, and the defaults live in `app/config.py: Settings`.
-  Row cap: `APP_MAX_RESULT_ROWS`. Timeouts: `APP_QUERY_TIMEOUT_SECONDS`,
+  Row and byte caps: `APP_MAX_RESULT_ROWS`, `APP_MAX_RESULT_BYTES`,
+  `APP_MAX_VALUE_BYTES`. Timeouts: `APP_QUERY_TIMEOUT_SECONDS`,
   `APP_EXPLAIN_TIMEOUT_SECONDS`. Cost: `APP_COST_THRESHOLD`. Rate limits:
   `APP_DEMO_RATE_LIMIT` and `APP_SAMPLE_RATE_LIMIT`, over a window of
   `APP_DEMO_RATE_LIMIT_WINDOW_SECONDS` (this one isn't in

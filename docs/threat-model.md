@@ -128,6 +128,19 @@ therefore carries its own `statement_timeout` (30 s by default, set by
 `scripts/provision_readonly_role.py`) as a third backstop. The red-team
 suite checks it on a real provisioned role, connecting directly.
 
+**Memory, too.** A cheap query can still return a huge answer: the cost
+check prices the work, not the size, so `select repeat('x', 500000000)`
+passed it and built 500 MB. Now `repeat()`, `lpad()` and `rpad()` may
+only build up to 1,000 characters, given as a plain number
+(`app/query/validation.py: MAX_GENERATED_LENGTH`), and the result is cut
+at 200 rows, 1 MB in all and 10 KB per text value
+(`app/query/result_cap.py`), with `truncated` and a note when it is.
+**Residual:** a value arrives from Postgres whole before it can be cut,
+and a query can still grow one by aggregating, as in `string_agg` over a
+long `generate_series`. That is bounded by the 5-second statement
+timeout and by the service's `MemoryMax` (`deploy/mcp-backbone.service`),
+which restarts this service rather than starving the shared server.
+
 ### T4: a transient infrastructure failure (dropped connection) looks like a real error
 
 **Mitigation:** a small, explicit set of asyncpg connection-level

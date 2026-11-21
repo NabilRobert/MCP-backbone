@@ -42,6 +42,14 @@ ALLOWED_ANONYMOUS_FUNCTIONS: frozenset[str] = frozenset(
     }
 )
 
+# The longest string repeat(), lpad() or rpad() may build. Each takes a
+# length, and "repeat('x', 500000000)" makes Postgres build 500 MB and
+# hand it to this server: one cheap query that exhausts memory. Padding
+# a code or a month number needs a handful of characters; 1,000 leaves
+# room for any real use. Only a whole-number literal is accepted, since a
+# column or an expression could be any size.
+MAX_GENERATED_LENGTH = 1_000
+
 # If a query doesn't already say how many rows to return, we cap it at
 # this many -- stops one accidental "give me everything" query from
 # pulling back millions of rows.
@@ -121,6 +129,11 @@ def validate_and_normalize(sql: str) -> str:
     for func in statement.find_all(exp.Anonymous):
         _reject_unless_allowed(func)
 
+    # Check 7: does it build a huge string out of nothing? (see
+    # MAX_GENERATED_LENGTH above.)
+    for func in statement.find_all(exp.Repeat, exp.Pad):
+        _reject_unless_short(func)
+
     # All checks passed. One last adjustment: if the query doesn't
     # already limit how many rows it returns, add that limit ourselves.
     if not statement.args.get("limit"):
@@ -149,4 +162,27 @@ def _reject_unless_allowed(func: exp.Anonymous) -> None:
         raise QueryRejected(
             f"function '{qualified_name}' is schema-qualified: "
             "call an allowed builtin without a schema"
+        )
+
+
+def _reject_unless_short(func: exp.Repeat | exp.Pad) -> None:
+    """Raises QueryRejected unless the length `func` builds is a
+    whole-number literal of at most MAX_GENERATED_LENGTH."""
+    name = (
+        "repeat"
+        if isinstance(func, exp.Repeat)
+        else ("lpad" if func.args.get("is_left") else "rpad")
+    )
+    length = func.args.get("times") if isinstance(func, exp.Repeat) else func.expression
+    is_short = (
+        isinstance(length, exp.Literal)
+        and not length.is_string
+        and length.this.isdigit()
+        and int(length.this) <= MAX_GENERATED_LENGTH
+    )
+    if not is_short:
+        raise QueryRejected(
+            f"{name}() may only build up to {MAX_GENERATED_LENGTH:,} characters, "
+            "given as a plain number: a bigger or computed length could use up the "
+            "server's memory"
         )

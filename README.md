@@ -47,7 +47,7 @@ might fail:
    built-in functions are allowed.
 3. **Cost check:** `EXPLAIN` estimates the cost before anything runs, and
    expensive queries are rejected.
-4. **Execution limits:** a statement timeout, and results capped at 200 rows.
+4. **Execution limits:** a statement timeout, and results capped at 200 rows and 1 MB.
 5. **The database itself:** every transaction is `READ ONLY`, and where
    possible the login is a read-only role too. Each covers a gap the other
    has (see the [threat model](docs/threat-model.md)).
