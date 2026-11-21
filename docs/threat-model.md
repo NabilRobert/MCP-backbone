@@ -314,7 +314,10 @@ reads, not in the user's prompt).
   demo database has the validator only. The script also closes two
   PUBLIC grants that would have let even a read-only role create objects
   (`CREATE` on the schema, from Pagila's own dump, and `TEMP` on the
-  database).
+  database). It also hides `pg_stat_activity`, `pg_roles` and
+  `pg_database` there: every demo account shares one role, and Postgres
+  shows a role its own sessions' queries, so demo users could read each
+  other's SQL.
 - **Demo account spam beyond the caps.** Signups are capped per client IP
   and in total per day, but someone with many IP addresses can still use
   up the daily total. That locks out new demo signups for the day; it
