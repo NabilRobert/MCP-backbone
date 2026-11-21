@@ -12,10 +12,12 @@ Two tiers, gated by risk:
 
 import asyncio
 import datetime
+import logging
 import re
 import secrets
 from dataclasses import dataclass, field
 
+import asyncpg  # pyright: ignore[reportMissingTypeStubs] -- asyncpg ships no stubs
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +30,17 @@ from app.config import settings
 from app.console import throttle
 from app.db import create_target_engine
 from app.query.network_guard import UnsafeTargetError, ensure_public_target
+from app.query.target import asyncpg_cause
+
+logger = logging.getLogger(__name__)
+
+# Shown when a signup's database can't be reached for a reason other than
+# Postgres itself refusing. The driver's own text (a socket error, a TLS
+# failure) helps nobody fix the URL and describes this server's network.
+COULD_NOT_CONNECT = (
+    "could not connect to that database: check its host, port and name, "
+    "and that it accepts connections from the internet"
+)
 
 MIN_PASSWORD_LENGTH = 12
 CONNECT_TIMEOUT_SECONDS = 10
@@ -113,8 +126,8 @@ async def _check_target(connection_url: str) -> list[str]:
                 ).scalar()
     except TimeoutError as exc:
         raise SignupError("could not connect to that database (timed out)") from exc
-    except Exception as exc:  # any driver error means "can't connect"; say why
-        raise SignupError(f"could not connect to that database: {exc}") from exc
+    except Exception as exc:  # any driver error means "can't connect"
+        raise SignupError(_connect_failure_reason(exc)) from exc
     finally:
         await engine.dispose()
 
@@ -123,6 +136,18 @@ async def _check_target(connection_url: str) -> list[str]:
     if can_write:
         return ["That login can write to the database. A read-only login is safer."]
     return []
+
+
+def _connect_failure_reason(exc: Exception) -> str:
+    """Postgres's own refusal ("password authentication failed for user
+    ...") when there is one, since that's what the user needs to fix their
+    URL; fixed text for anything else. The full error goes to the debug log."""
+    logger.debug("a signup's connection check failed", exc_info=exc)
+    cause = asyncpg_cause(exc)
+    if not isinstance(cause, asyncpg.exceptions.PostgresError):
+        return COULD_NOT_CONNECT
+    message: str = getattr(cause, "message", "") or str(cause)
+    return f"could not connect to that database: {message}"
 
 
 async def _check_demo_capacity(
