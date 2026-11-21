@@ -238,8 +238,11 @@ setting things up:
   `.env` at run time, so this file contains none.
 - **`mcp-backbone.service`** — the systemd unit that runs the server
   (restarts on failure, starts at boot). uvicorn serves HTTPS itself
-  on port 8443. The public address is `https://mcp.my.id`, through the
-  Caddy proxy below; 8443 also still answers directly.
+  on `172.18.0.1:8443`, the host's address on Caddy's Docker network, so
+  only Caddy and the host can reach it. The public address is
+  `https://mcp.my.id`, through the Caddy proxy below. The unit sandboxes
+  the service: a read-only filesystem, the rest of `/home` and the
+  Docker socket hidden, no privileges, and a memory ceiling.
   Install instructions are in its header.
 - **`certbot-deploy-hook.sh`** — runs after each automatic certificate
   renewal: copies the new cert to where the service can read it, then

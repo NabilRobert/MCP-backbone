@@ -9,7 +9,7 @@ file referenced lives in `deploy/` unless stated otherwise.
 | Piece | Where |
 |---|---|
 | App | `~/MCP-backbone` (git clone), `.venv`, `.env` (mode 600, all secrets) |
-| Process | systemd unit `mcp-backbone` → uvicorn on 8443 (TLS) |
+| Process | systemd unit `mcp-backbone` (sandboxed) → uvicorn on `172.18.0.1:8443` (TLS), the host's address on Caddy's Docker network |
 | Public entry | The shared Caddy container (`DEPLOY_CADDY_CONTAINER` in `.env`) proxies `mcp.my.id:443` → `https://172.18.0.1:8443` |
 | Bookkeeping DB | local Postgres 16, database `jarvis_mcp_bookkeeping` (loopback only) |
 | Demo DB | same Postgres, database `pagila_demo`, read-only login `pagila_ro` |
@@ -29,7 +29,7 @@ uv sync --frozen                                  # dependencies exactly as in u
 .venv/bin/alembic upgrade head
 sudo systemctl restart mcp-backbone
 systemctl is-active mcp-backbone
-curl -sk https://localhost:8443/healthz           # its "version"...
+curl -sk https://172.18.0.1:8443/healthz          # its "version"...
 git rev-parse --short=12 HEAD                     # ...must match this
 ```
 Why this order: the service runs whatever is in `.venv`. Restarting after
@@ -92,6 +92,37 @@ first, then run this to see what it would do, and add `--apply` to do it:
 workspace then queries the default database, so it isn't cut off. The script
 never reads or prints the URL. Way back: `scripts/seed_workspace.py` makes a
 new workspace, and the old rows only return from a backup (see Restore below).
+
+**Change the service file.** A deploy doesn't touch `/etc/systemd/system/`.
+Check the new file before it replaces the old one, keep the old one to go
+back to, and restart:
+```bash
+sudo cp /etc/systemd/system/mcp-backbone.service ~/mcp-backbone.service.bak
+systemd-analyze verify deploy/mcp-backbone.service
+sudo cp deploy/mcp-backbone.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
+systemctl is-active mcp-backbone && curl -sk https://172.18.0.1:8443/healthz
+systemd-analyze security mcp-backbone | tail -1   # the exposure score
+```
+To go back: copy `~/mcp-backbone.service.bak` into place, `daemon-reload`, restart.
+
+**Run as a dedicated user** (not done yet; Arthur decides when). The
+service runs as `ubuntu`, which is in the `docker` group and so as good as
+root. The sandbox in the unit file limits what the app can reach, but a
+user of its own is the real fix:
+1. `sudo adduser --system --group --no-create-home --shell /usr/sbin/nologin mcp`
+   (not in `docker`).
+2. Make the checkout readable by it and `.env` readable by it alone:
+   `sudo chgrp -R mcp ~/MCP-backbone && sudo chmod -R g+rX ~/MCP-backbone`,
+   then `sudo chown ubuntu:mcp .env && chmod 640 .env`. `ubuntu` keeps
+   deploying with `git pull` as before. (Or move the checkout to
+   `/srv/mcp-backbone` and update the paths below.)
+3. TLS files: in `certbot-deploy-hook.sh`, change `-g ubuntu` to `-g mcp`, and
+   run the hook once.
+4. In the unit file: `User=mcp`. `ProtectHome=tmpfs` and the
+   `BindReadOnlyPaths=` line stay as they are while the checkout is under
+   `/home/ubuntu`. Then follow "Change the service file" above.
+5. Check: `ps -o user= -C uvicorn` shows `mcp`, `/healthz` answers, a login works.
 
 **Logs:** `journalctl -u mcp-backbone -f` (app), `docker logs <proxy-container>`
 (Caddy), `~/backups/backup.log` (backups).
