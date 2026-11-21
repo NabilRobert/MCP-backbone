@@ -96,6 +96,9 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
 
+In Safari over plain `http://`, set `APP_CONSOLE_COOKIE_HTTPS_ONLY=false`
+in `.env`, or the console login won't stick.
+
 One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 `/healthz`. Invite someone with
 `python -m scripts.create_invite --note "alice"`. Deploying, monitoring,

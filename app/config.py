@@ -4,7 +4,7 @@ and uses -- see .env.example for what every value actually means."""
 
 import secrets
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,10 +72,12 @@ class Settings(BaseSettings):
     # Set this explicitly for anything longer-lived.
     console_session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     # Marks the console's session cookie Secure, so a browser only ever
-    # sends it over HTTPS. Turn on for any real deployment; it has to
-    # stay off for local development over plain http://, or the browser
-    # drops the cookie and login silently never sticks.
-    console_cookie_https_only: bool = False
+    # sends it over HTTPS. On by default: a review found it off on the
+    # live server, because the runbook never set it. Chrome and Firefox
+    # keep a Secure cookie on http://localhost too; for Safari, or any
+    # other plain-http address, set it false in a local .env. A server
+    # reachable at a public name refuses to start with it off (below).
+    console_cookie_https_only: bool = True
     # The MCP server's own DNS-rebinding protection only allows the Host
     # header to be 127.0.0.1/localhost unless told otherwise -- real,
     # not theoretical: a real deploy got every external request rejected
@@ -94,6 +96,26 @@ class Settings(BaseSettings):
         # APP_CONSOLE_SESSION_SECRET= (present but empty, as copied from
         # .env.example) would otherwise be an empty signing key.
         return value if value else secrets.token_urlsafe(32)
+
+    @model_validator(mode="after")
+    def _refuse_insecure_cookie_on_a_public_host(self) -> "Settings":
+        # mcp_allowed_hosts names the public hostnames, so a non-local one
+        # means a real deployment, where a cookie sent over plain http
+        # could be read on the way.
+        public_hosts = [host for host in self.mcp_allowed_hosts.split(",") if _is_public(host)]
+        if public_hosts and not self.console_cookie_https_only:
+            raise ValueError(
+                f"APP_CONSOLE_COOKIE_HTTPS_ONLY is false but this server is reachable at "
+                f"{public_hosts[0]}: set APP_CONSOLE_COOKIE_HTTPS_ONLY=true in .env"
+            )
+        return self
+
+
+LOCAL_HOSTNAMES = frozenset({"", "localhost", "127.0.0.1", "::1"})
+
+
+def _is_public(hostname: str) -> bool:
+    return hostname.strip().lower() not in LOCAL_HOSTNAMES
 
 
 # Built once, at import time, from whatever's in the environment/.env

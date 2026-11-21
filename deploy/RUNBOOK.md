@@ -126,7 +126,9 @@ with, or the stored connection URLs can't be decrypted.
    only, password auth).
 3. **App:** clone to `~/MCP-backbone`, `uv sync --frozen` (creates `.venv`
    from `uv.lock`), copy `.env.example` → `.env` (mode 600)
-   and fill it in. Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
+   and fill it in. A deployment needs `APP_MCP_ALLOWED_HOSTS=mcp.my.id`
+   and `APP_CONSOLE_COOKIE_HTTPS_ONLY=true` (the default; the server
+   refuses to start with it false once a public host is set). Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
    off-server copy if restoring data. Then `.venv/bin/alembic upgrade head`.
 4. **TLS for 8443:** `certbot certonly --dns-cloudflare
    --dns-cloudflare-credentials <token file, mode 600> -d mcp.my.id`, install
