@@ -220,6 +220,12 @@ invite codes are stored only as hashes, as before.
 data and the key. This protects against leaks, not a full server
 compromise.
 
+Someone with the server also has its S3 key, so that key can only upload
+and read: it's denied deleting (`deploy/s3-backup-key-policy.json`), old
+copies expire by a lifecycle rule instead, and bucket versioning keeps an
+overwritten copy. A server compromise can't take the off-site backups
+with it.
+
 ### T9: data read through `sample_rows`, or console passwords guessed, without limit
 
 **Mitigation:** `sample_rows` returns real rows, so it's now audited (one

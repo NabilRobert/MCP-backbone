@@ -78,7 +78,9 @@ Restore below) before trusting it.
 **Rotate the backup key:** make a new key pair off the server, set
 `AGE_PUBLIC_KEY` in `.env` to the new public key, and run the script once.
 Then prove a restore with the new private key, and only after that delete
-the old-key backups, locally and in S3.
+the old-key backups locally. In S3 they expire on their own within 15 days
+(the server's key can't delete them); to remove them sooner, delete them in
+the AWS console with your own login.
 
 **Remove a stored connection** (for example one that no longer decrypts after
 the encryption key changed). There's no console button for this. Back up
@@ -136,6 +138,30 @@ user of its own is the real fix:
    success and `/fail` on error, so a failing *or silently missing* backup
    emails you.
 
+## Off-site backups: set up in AWS (once)
+
+The backup script only uploads; it never deletes from S3. Old copies
+expire by a lifecycle rule, and the server's key is denied deleting, so a
+stolen copy of that key can't wipe the off-site backups. Apply these in
+AWS with your own login, not the server's key:
+1. **Versioning:** turn it on for the bucket, so a copy overwritten by a
+   stolen key is kept as an older version.
+2. **Lifecycle:** `deploy/s3-lifecycle.json` expires `bookkeeping/` copies
+   after 15 days (about the 14 the script keeps locally) and older
+   versions 7 days after that. Applying a lifecycle configuration
+   replaces the bucket's whole set of rules, so first check for others
+   with `aws s3api get-bucket-lifecycle-configuration --bucket <bucket>`
+   and merge them in. Then:
+   `aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-configuration file://deploy/s3-lifecycle.json`
+3. **Key policy:** replace the backup user's policy with
+   `deploy/s3-backup-key-policy.json`, with `BUCKET_NAME` filled in. It
+   allows listing, uploading and reading `bookkeeping/`, and denies every
+   delete and any change to the bucket's policy, versioning or lifecycle.
+4. **Check:** with the server's key (the `RCLONE_S3_*` settings from the
+   backup script), `rclone deletefile ":s3:<bucket>/bookkeeping/<a file>"`
+   must fail with AccessDenied, and the next nightly backup must still
+   upload.
+
 ## Restore the bookkeeping database
 
 Needs the age **private** key (kept off the server) on the machine doing
@@ -169,7 +195,7 @@ with, or the stored connection URLs can't be decrypted.
 6. **Public entry:** add `caddy-mcp.caddyfile` to the Caddy container's Caddyfile (its
    header has the validate-then-reload steps).
 7. **Demo database:** `bash deploy/setup_demo_database.sh`.
-8. **Backups:** copy `backup_bookkeeping.sh` to `~/bin/`, add `AGE_PUBLIC_KEY` and the AWS/S3
+8. **Backups:** set up the bucket as in "Off-site backups" above, copy `backup_bookkeeping.sh` to `~/bin/`, add `AGE_PUBLIC_KEY` and the AWS/S3
    values to `.env`, `crontab deploy/crontab` (merge with any existing
    lines), run it once by hand.
 9. **Firewall:** add `DEPLOY_CADDY_CONTAINER` to `.env`, run

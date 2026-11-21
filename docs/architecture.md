@@ -234,7 +234,9 @@ setting things up:
 - **`backup_bookkeeping.sh`** — the VPS's nightly backup (installed as
   `~/bin/backup_bookkeeping.sh`, run by cron at 03:17). Dumps the
   bookkeeping database, encrypts it with `age`, and uploads it to S3,
-  keeping the last 14 locally and remotely. Reads every secret from
+  keeping the last 14 locally. It never deletes from S3: copies there
+  expire by the bucket's lifecycle rule (`s3-lifecycle.json`), and the
+  key's policy (`s3-backup-key-policy.json`) denies deleting. Reads every secret from
   `.env` at run time, so this file contains none.
 - **`mcp-backbone.service`** — the systemd unit that runs the server
   (restarts on failure, starts at boot). uvicorn serves HTTPS itself

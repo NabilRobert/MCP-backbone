@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Nightly dump of the local MCP bookkeeping database, age-encrypted. Keeps
-# the last 14 encrypted copies locally and in S3 (off-server). The plaintext
-# dump is deleted as soon as it's encrypted, and on any failure.
+# the last 14 encrypted copies locally, and uploads each one to S3
+# (off-server). The plaintext dump is deleted as soon as it's encrypted,
+# and on any failure.
+#
+# It never deletes from S3. Old copies there expire by the bucket's
+# lifecycle rule (deploy/s3-lifecycle.json), and the key's policy
+# (deploy/s3-backup-key-policy.json) denies deleting at all, so someone
+# holding this server's key can't wipe the off-site backups too.
 #
 # Deployed on the VPS as ~/bin/backup_bookkeeping.sh (see deploy/RUNBOOK.md), run by cron daily at
 # 03:17. Every setting comes from ~/MCP-backbone/.env at run time, the age
@@ -71,10 +77,5 @@ REMOTE=":s3:$S3_BUCKET/bookkeeping"
 rclone copy "$OUT.age" "$REMOTE/"
 
 ls -1t "$BACKUP_DIR"/jarvis_mcp_bookkeeping-*.dump.age | tail -n +15 | xargs -r rm --
-
-# Prune remote copies, but only files this script created.
-rclone lsf "$REMOTE" --files-only --include 'jarvis_mcp_bookkeeping-*.dump.age' \
-  | sort -r | tail -n +15 \
-  | xargs -r -I{} rclone deletefile "$REMOTE/{}"
 
 ping_hc ""

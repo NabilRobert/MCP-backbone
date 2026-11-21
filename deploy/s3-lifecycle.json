@@ -1,0 +1,12 @@
+{
+  "Rules": [
+    {
+      "ID": "bookkeeping-backups-expire-after-15-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "bookkeeping/" },
+      "Expiration": { "Days": 15 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}
