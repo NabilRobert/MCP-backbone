@@ -14,6 +14,15 @@ small web console, get an API key, and watch their audit log there. One
 FastAPI process serves both the MCP endpoint (`/mcp/`) and the console
 (`/console/`).
 
+## What it looks like
+
+| 1 · Ask a question | 2 · Try to change data |
+|---|---|
+| ![Claude explores the schema, then answers with one read-only query](../app/console/static/demo/step1.gif) | ![The server refuses a DELETE: only SELECT statements are allowed](../app/console/static/demo/step2.gif) |
+
+Every query, including the refused one, then shows up in the console's
+[audit trail](../app/console/static/demo/step3.png).
+
 ## The flow: one `run_query` call
 
 An AI client (Claude Code with the plugin) asks: "run
@@ -239,7 +248,7 @@ everywhere.
 - **Run everything locally:** the README's "Run it yourself" section.
   Checks, as CI runs them: `uv run ruff check .`,
   `uv run pyright app/ tests/ scripts/`, `uv run pytest` (needs the
-  test database from the README).
+  test database from the last section).
 - **Change a limit:** set it in `.env`. Each has a comment in
   `.env.example`, and the defaults live in `app/config.py: Settings`.
   Row and byte caps: `APP_MAX_RESULT_ROWS`, `APP_MAX_RESULT_BYTES`,
@@ -280,3 +289,32 @@ everywhere.
   `app/console/static/main.js` (CI checks they match).
 - **Deploy:** follow the steps in [the runbook](../deploy/RUNBOOK.md), in
   order: sync dependencies and migrate before restarting.
+
+## Tests, tracing and local development
+
+In Safari over plain `http://`, set `APP_CONSOLE_COOKIE_HTTPS_ONLY=false`
+in `.env`, or the console login won't stick.
+
+**Tracing** (optional): set `OTEL_EXPORTER_OTLP_ENDPOINT` (for example
+`http://127.0.0.1:4318`) and every tool call is exported as an
+OpenTelemetry trace: the MCP SDK's span for the request, with one child
+span per stage (`authenticate`, `rate_limit`, `validate`, `cost_check`,
+`execute`, `audit`), joined to the calling agent's trace through the
+request's `_meta`. Off without the variable. No SQL text or rejection
+reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
+`app/tracing.py`.
+
+**Tests** (against real Postgres, run in CI on every push) need a
+disposable database. The suite drops every table after each test and
+refuses to run unless the database name contains `test`. It also needs
+`CREATEROLE`, because the red-team tests create real throwaway roles:
+
+```bash
+docker run -d --name mcp-test-db -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=test -p 55432:5432 postgres:16-alpine
+# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
+uv run pytest
+```
+
+The console's compiled JavaScript is committed (the server needs no Node);
+CI fails if it drifts from `static-src/main.ts`.
