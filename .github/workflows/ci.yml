@@ -35,9 +35,13 @@ jobs:
       # "Run it yourself" section.
       APP_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
       APP_TARGET_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/test
+      GITLEAKS_VERSION: "8.30.1"
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks scans every commit, not only the last one.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -61,6 +65,19 @@ jobs:
 
       - name: Test (pytest)
         run: uv run --frozen pytest tests/ -v
+
+      # Same step as whatsapp-finance-tracker's CI (e23e393).
+      - name: Install gitleaks, checked against its published checksum
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "${base}/${archive}"
+          curl -sSfL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " ${archive}$" | sha256sum -c -
+          tar -xzf "${archive}" gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+
+      - name: Secret scan (gitleaks, every commit)
+        run: gitleaks git --no-banner --redact .
 
   console:
     # The console's compiled JS is committed (the server has no Node), so

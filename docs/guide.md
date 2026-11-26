@@ -248,7 +248,8 @@ everywhere.
 - **Run everything locally:** the README's "Run it yourself" section.
   Checks, as CI runs them: `uv run ruff check .`,
   `uv run pyright app/ tests/ scripts/`, `uv run pytest` (needs the
-  test database from the last section).
+  test database from the last section), and a secret scan of every
+  commit, `gitleaks git --no-banner --redact .`.
 - **Change a limit:** set it in `.env`. Each has a comment in
   `.env.example`, and the defaults live in `app/config.py: Settings`.
   Row and byte caps: `APP_MAX_RESULT_ROWS`, `APP_MAX_RESULT_BYTES`,
