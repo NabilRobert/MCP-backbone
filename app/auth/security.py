@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 
+import anyio
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
@@ -57,6 +58,27 @@ def verify_password(password: str, stored: str) -> bool:
         return _password_hasher.verify(stored, password)
     except (VerificationError, InvalidHashError):
         return False
+
+
+# At most this many Argon2 hashes at once. Each takes 64 MiB
+# (PasswordHasher's memory_cost), and anyio's default of 40 worker
+# threads would let a burst of logins take 2.5 GB. Two keep a login
+# waiting at most a moment, in 128 MiB.
+MAX_CONCURRENT_HASHES = 2
+_hashing_slots = anyio.CapacityLimiter(MAX_CONCURRENT_HASHES)
+
+
+async def hash_password_in_thread(password: str) -> str:
+    """hash_password for async code. Argon2 takes tens of milliseconds of
+    CPU on purpose; run on the event loop, every other request (MCP
+    streams included) would wait behind each login."""
+    return await anyio.to_thread.run_sync(hash_password, password, limiter=_hashing_slots)
+
+
+async def verify_password_in_thread(password: str, stored: str) -> bool:
+    """verify_password for async code, off the event loop for the same
+    reason as hash_password_in_thread."""
+    return await anyio.to_thread.run_sync(verify_password, password, stored, limiter=_hashing_slots)
 
 
 def needs_rehash(stored: str) -> bool:

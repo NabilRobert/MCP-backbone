@@ -2,6 +2,7 @@
 workspace gets (app/auth/signup.py)."""
 
 import datetime
+import html
 
 import pytest
 from sqlalchemy import delete, select, text
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import InviteCode, ThrottleEvent, Workspace
 from app.auth.service import authenticate
-from app.auth.signup import create_invite
+from app.auth.signup import COULD_NOT_CONNECT, create_invite
 from app.config import settings
 from app.db import engine
 from app.main import app
@@ -255,3 +256,27 @@ async def test_default_target_is_exempt_from_the_private_address_guard(
     workspace = await authenticate(db_session, api_key)
 
     assert isinstance(await list_tables(db_session, workspace), list)
+
+
+async def test_an_unreachable_signup_database_gets_fixed_text_not_the_driver_error(
+    db_session: AsyncSession,
+) -> None:
+    invite = await create_invite(db_session, "for-driver-text-test")
+    response = _signup(
+        ConsoleClient(app), invite, connection_url="postgresql://u:p@127.0.0.1:1/nothing"
+    )
+
+    assert response.status_code == 400
+    assert html.escape(COULD_NOT_CONNECT, quote=True) in response.text
+    assert "Errno" not in response.text and "Connect call failed" not in response.text
+
+
+async def test_a_signup_database_refusing_the_login_says_why(db_session: AsyncSession) -> None:
+    invite = await create_invite(db_session, "for-refusal-test")
+    wrong_password = engine.url.set(password="not-the-password").render_as_string(
+        hide_password=False
+    )
+    response = _signup(ConsoleClient(app), invite, connection_url=wrong_password)
+
+    assert response.status_code == 400
+    assert "password authentication failed" in response.text

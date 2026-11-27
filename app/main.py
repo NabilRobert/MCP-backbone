@@ -81,8 +81,8 @@ STATIC_DIR = Path(__file__).parent / "console" / "static"
 
 # The console's signed session cookie. same_site="strict" is the first
 # CSRF defense (every form is a same-origin POST); the per-session form
-# token in app/console/csrf.py is the second. https_only is on for the
-# deployment, off for local plain-HTTP development.
+# token in app/console/csrf.py is the second. https_only is on unless
+# .env turns it off for plain-HTTP development (see app/config.py).
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.console_session_secret,

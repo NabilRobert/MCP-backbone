@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListTheBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::BUCKET_NAME"
+    },
+    {
+      "Sid": "WriteAndReadTheBookkeepingBackups",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+      "Resource": "arn:aws:s3:::BUCKET_NAME/bookkeeping/*"
+    },
+    {
+      "Sid": "NeverDeleteOrLoosenTheBucketsRules",
+      "Effect": "Deny",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketVersioning",
+        "s3:PutLifecycleConfiguration"
+      ],
+      "Resource": ["arn:aws:s3:::BUCKET_NAME", "arn:aws:s3:::BUCKET_NAME/*"]
+    }
+  ]
+}

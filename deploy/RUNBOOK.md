@@ -9,7 +9,7 @@ file referenced lives in `deploy/` unless stated otherwise.
 | Piece | Where |
 |---|---|
 | App | `~/MCP-backbone` (git clone), `.venv`, `.env` (mode 600, all secrets) |
-| Process | systemd unit `mcp-backbone` → uvicorn on 8443 (TLS) |
+| Process | systemd unit `mcp-backbone` (sandboxed) → uvicorn on `172.18.0.1:8443` (TLS), the host's address on Caddy's Docker network |
 | Public entry | The shared Caddy container (`DEPLOY_CADDY_CONTAINER` in `.env`) proxies `mcp.my.id:443` → `https://172.18.0.1:8443` |
 | Bookkeeping DB | local Postgres 16, database `jarvis_mcp_bookkeeping` (loopback only) |
 | Demo DB | same Postgres, database `pagila_demo`, read-only login `pagila_ro` |
@@ -29,7 +29,7 @@ uv sync --frozen                                  # dependencies exactly as in u
 .venv/bin/alembic upgrade head
 sudo systemctl restart mcp-backbone
 systemctl is-active mcp-backbone
-curl -sk https://localhost:8443/healthz           # its "version"...
+curl -sk https://172.18.0.1:8443/healthz          # its "version"...
 git rev-parse --short=12 HEAD                     # ...must match this
 ```
 Why this order: the service runs whatever is in `.venv`. Restarting after
@@ -78,7 +78,9 @@ Restore below) before trusting it.
 **Rotate the backup key:** make a new key pair off the server, set
 `AGE_PUBLIC_KEY` in `.env` to the new public key, and run the script once.
 Then prove a restore with the new private key, and only after that delete
-the old-key backups, locally and in S3.
+the old-key backups locally. In S3 they expire on their own within 15 days
+(the server's key can't delete them); to remove them sooner, delete them in
+the AWS console with your own login.
 
 **Remove a stored connection** (for example one that no longer decrypts after
 the encryption key changed). There's no console button for this. Back up
@@ -93,6 +95,37 @@ workspace then queries the default database, so it isn't cut off. The script
 never reads or prints the URL. Way back: `scripts/seed_workspace.py` makes a
 new workspace, and the old rows only return from a backup (see Restore below).
 
+**Change the service file.** A deploy doesn't touch `/etc/systemd/system/`.
+Check the new file before it replaces the old one, keep the old one to go
+back to, and restart:
+```bash
+sudo cp /etc/systemd/system/mcp-backbone.service ~/mcp-backbone.service.bak
+systemd-analyze verify deploy/mcp-backbone.service
+sudo cp deploy/mcp-backbone.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
+systemctl is-active mcp-backbone && curl -sk https://172.18.0.1:8443/healthz
+systemd-analyze security mcp-backbone | tail -1   # the exposure score
+```
+To go back: copy `~/mcp-backbone.service.bak` into place, `daemon-reload`, restart.
+
+**Run as a dedicated user** (not done yet; Arthur decides when). The
+service runs as `ubuntu`, which is in the `docker` group and so as good as
+root. The sandbox in the unit file limits what the app can reach, but a
+user of its own is the real fix:
+1. `sudo adduser --system --group --no-create-home --shell /usr/sbin/nologin mcp`
+   (not in `docker`).
+2. Make the checkout readable by it and `.env` readable by it alone:
+   `sudo chgrp -R mcp ~/MCP-backbone && sudo chmod -R g+rX ~/MCP-backbone`,
+   then `sudo chown ubuntu:mcp .env && chmod 640 .env`. `ubuntu` keeps
+   deploying with `git pull` as before. (Or move the checkout to
+   `/srv/mcp-backbone` and update the paths below.)
+3. TLS files: in `certbot-deploy-hook.sh`, change `-g ubuntu` to `-g mcp`, and
+   run the hook once.
+4. In the unit file: `User=mcp`. `ProtectHome=tmpfs` and the
+   `BindReadOnlyPaths=` line stay as they are while the checkout is under
+   `/home/ubuntu`. Then follow "Change the service file" above.
+5. Check: `ps -o user= -C uvicorn` shows `mcp`, `/healthz` answers, a login works.
+
 **Logs:** `journalctl -u mcp-backbone -f` (app), `docker logs <proxy-container>`
 (Caddy), `~/backups/backup.log` (backups).
 
@@ -104,6 +137,30 @@ new workspace, and the old rows only return from a backup (see Restore below).
    in `.env` as `BACKUP_HEALTHCHECK_URL`. The backup script pings it on
    success and `/fail` on error, so a failing *or silently missing* backup
    emails you.
+
+## Off-site backups: set up in AWS (once)
+
+The backup script only uploads; it never deletes from S3. Old copies
+expire by a lifecycle rule, and the server's key is denied deleting, so a
+stolen copy of that key can't wipe the off-site backups. Apply these in
+AWS with your own login, not the server's key:
+1. **Versioning:** turn it on for the bucket, so a copy overwritten by a
+   stolen key is kept as an older version.
+2. **Lifecycle:** `deploy/s3-lifecycle.json` expires `bookkeeping/` copies
+   after 15 days (about the 14 the script keeps locally) and older
+   versions 7 days after that. Applying a lifecycle configuration
+   replaces the bucket's whole set of rules, so first check for others
+   with `aws s3api get-bucket-lifecycle-configuration --bucket <bucket>`
+   and merge them in. Then:
+   `aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-configuration file://deploy/s3-lifecycle.json`
+3. **Key policy:** replace the backup user's policy with
+   `deploy/s3-backup-key-policy.json`, with `BUCKET_NAME` filled in. It
+   allows listing, uploading and reading `bookkeeping/`, and denies every
+   delete and any change to the bucket's policy, versioning or lifecycle.
+4. **Check:** with the server's key (the `RCLONE_S3_*` settings from the
+   backup script), `rclone deletefile ":s3:<bucket>/bookkeeping/<a file>"`
+   must fail with AccessDenied, and the next nightly backup must still
+   upload.
 
 ## Restore the bookkeeping database
 
@@ -126,7 +183,9 @@ with, or the stored connection URLs can't be decrypted.
    only, password auth).
 3. **App:** clone to `~/MCP-backbone`, `uv sync --frozen` (creates `.venv`
    from `uv.lock`), copy `.env.example` → `.env` (mode 600)
-   and fill it in. Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
+   and fill it in. A deployment needs `APP_MCP_ALLOWED_HOSTS=mcp.my.id`
+   and `APP_CONSOLE_COOKIE_HTTPS_ONLY=true` (the default; the server
+   refuses to start with it false once a public host is set). Restore `APP_CONNECTION_ENCRYPTION_KEY` from its
    off-server copy if restoring data. Then `.venv/bin/alembic upgrade head`.
 4. **TLS for 8443:** `certbot certonly --dns-cloudflare
    --dns-cloudflare-credentials <token file, mode 600> -d mcp.my.id`, install
@@ -136,11 +195,12 @@ with, or the stored connection URLs can't be decrypted.
 6. **Public entry:** add `caddy-mcp.caddyfile` to the Caddy container's Caddyfile (its
    header has the validate-then-reload steps).
 7. **Demo database:** `bash deploy/setup_demo_database.sh`.
-8. **Backups:** copy `backup_bookkeeping.sh` to `~/bin/`, add `AGE_PUBLIC_KEY` and the AWS/S3
+8. **Backups:** set up the bucket as in "Off-site backups" above, copy `backup_bookkeeping.sh` to `~/bin/`, add `AGE_PUBLIC_KEY` and the AWS/S3
    values to `.env`, `crontab deploy/crontab` (merge with any existing
    lines), run it once by hand.
 9. **Firewall:** add `DEPLOY_CADDY_CONTAINER` to `.env`, run
-   `bash deploy/firewall.sh`, then test SSH from outside and
-   cancel its safety timer.
+   `bash deploy/firewall.sh`. It only adds this project's rules, so it's
+   safe to re-run on the shared server. If it had to turn ufw on, test SSH
+   from outside and cancel its safety timer.
 10. **Check:** `/healthz` is 200 from outside, a signup works, and a
     `list_tables` through the plugin answers.

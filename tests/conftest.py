@@ -32,6 +32,9 @@ if test_url := _test_database_url():
 # localhost, which the address guard would otherwise refuse.
 os.environ.setdefault("APP_CONNECTION_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("APP_ALLOW_PRIVATE_TARGETS", "true")
+# The test client talks plain http://testserver, where a Secure cookie
+# would be dropped; tests that need it on flip it themselves.
+os.environ.setdefault("APP_CONSOLE_COOKIE_HTTPS_ONLY", "false")
 
 import pytest
 import pytest_asyncio

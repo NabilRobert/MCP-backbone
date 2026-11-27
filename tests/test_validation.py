@@ -153,6 +153,14 @@ def test_an_allowed_builtin_called_with_a_schema_is_rejected(sql: str) -> None:
         validate_and_normalize(sql)
 
 
+@pytest.mark.parametrize("sql", ['select "age"(now())', 'select "AGE"(now())'])
+def test_an_allowed_builtin_called_by_a_quoted_name_is_rejected(sql: str) -> None:
+    """Quoting makes Postgres match the case exactly, and sqlglot writes the
+    name back as "AGE": no builtin is called that, only a user's function."""
+    with pytest.raises(QueryRejected, match="quoted"):
+        validate_and_normalize(sql)
+
+
 @pytest.mark.parametrize(
     "sql",
     [
@@ -171,3 +179,34 @@ def test_an_allowed_builtin_called_with_a_schema_is_rejected(sql: str) -> None:
 def test_builtins_with_side_effects_stay_rejected(sql: str) -> None:
     with pytest.raises(QueryRejected, match="not on the allowlist"):
         validate_and_normalize(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select repeat('x', 500000000)",
+        "select lpad('x', 500000000, 'y')",
+        "select rpad('', 900000000)",
+        "select md5(repeat('a', 100000000))",
+        "select repeat('x', 1001)",
+        "select lpad(label, id) from demo_items",
+        "select repeat('x', (select 500000000))",
+    ],
+)
+def test_a_string_built_longer_than_the_ceiling_is_rejected(sql: str) -> None:
+    """One cheap call can build a string of hundreds of MB, which Postgres
+    then hands to this server whole."""
+    with pytest.raises(QueryRejected, match="may only build up to 1,000 characters"):
+        validate_and_normalize(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select lpad('7', 2, '0')",
+        "select rpad(label, 10) from demo_items",
+        "select repeat('-', 1000)",
+    ],
+)
+def test_short_padding_and_repeats_are_allowed(sql: str) -> None:
+    validate_and_normalize(sql)

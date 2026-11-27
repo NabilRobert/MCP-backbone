@@ -14,6 +14,15 @@ small web console, get an API key, and watch their audit log there. One
 FastAPI process serves both the MCP endpoint (`/mcp/`) and the console
 (`/console/`).
 
+## What it looks like
+
+| 1 · Ask a question | 2 · Try to change data |
+|---|---|
+| ![Claude explores the schema, then answers with one read-only query](../app/console/static/demo/step1.gif) | ![The server refuses a DELETE: only SELECT statements are allowed](../app/console/static/demo/step2.gif) |
+
+Every query, including the refused one, then shows up in the console's
+[audit trail](../app/console/static/demo/step3.png).
+
 ## The flow: one `run_query` call
 
 An AI client (Claude Code with the plugin) asks: "run
@@ -34,8 +43,8 @@ sequenceDiagram
     S->>Q: run_query(workspace, sql)
     Q->>B: rate-limit counter +1
     Q->>Q: validate SQL (sqlglot)
-    Q->>T: EXPLAIN (cost check)
-    Q->>T: run query (READ ONLY, timeout)
+    Q->>T: look-alike check, then EXPLAIN (cost check)
+    Q->>T: look-alike check, then run query (READ ONLY, timeout)
     Q->>B: write audit row
     Q-->>C: {status, rows, error}
 ```
@@ -81,16 +90,20 @@ sequenceDiagram
 7. **Is it too expensive?** `app/query/service.py: _query_target` opens
    a connection with `app/query/target.py: connect_to_target`, the one
    way every tool reaches a target. Every transaction on it is
-   `READ ONLY`. `app/query/service.py: _estimate_cost` calls
-   `app/query/cost_check.py: check_cost`, which asks Postgres for the
-   plan's cost with `EXPLAIN`, without running the query, under a
-   2-second timeout. Over 40,000, it's rejected.
+   `READ ONLY`. `app/query/service.py: _estimate_cost` first calls
+   `app/query/lookalikes.py: refuse_lookalikes`: if a function the query
+   calls has a look-alike on the target, the query is refused before
+   `EXPLAIN`, which can run a function while planning. Then
+   `app/query/cost_check.py: check_cost` asks Postgres for the plan's
+   cost with `EXPLAIN`, without running the query, under a 2-second
+   timeout. Over 40,000, it's rejected.
 8. **Run it.** `app/query/service.py: _execute` calls
    `app/query/service.py: _run_with_retry`, which takes a fresh connection
-   and sets a 5-second statement timeout. If the connection drops, it
+   and sets a 5-second statement timeout. It checks for look-alikes
+   again, in case one appeared since step 7. If the connection drops, it
    tries once more on a new connection. It never retries a query that
-   was just slow. `app/query/service.py: _fetch_capped` reads at most
-   200 rows.
+   was just slow. `app/query/result_cap.py: fetch_capped` reads at most
+   200 rows and 1 MB, and shortens any text value over 10 KB.
 9. **Audit, then answer.** `app/query/service.py: _finish` calls
    `app/query/service.py: write_audit`, which saves one `QueryExecution`
    row (the audit log), and only then returns the result. If the audit
@@ -137,14 +150,18 @@ the query as rewritten here, a docs link) is logged at debug level only.
    `app/console/csrf.py: csrf_token`.
 2. `POST /console/login` first passes
    `app/console/csrf.py: verify_csrf`, which runs on every console POST.
-3. `app/console/routes.py: login_submit` checks the per-IP lockout
-   (`app/console/throttle.py: is_blocked`), then
-   `app/console/auth.py: verify_console_login`. That checks the password
-   with Argon2 (`app/auth/security.py: verify_password`) and upgrades an
-   old hash if needed.
-4. On success, `app/console/auth.py: log_in` stores the workspace in the
-   signed session cookie. A failure is recorded
-   (`app/console/throttle.py: record`).
+3. `app/console/routes.py: login_submit` counts the attempt as a
+   failure first (`app/console/throttle.py: claim_attempt`), and refuses
+   it if that puts the IP over the lockout limit. Counting before
+   checking means guesses sent all at once can't slip past. Then
+   `app/console/auth.py: verify_console_login` checks the password with
+   Argon2 in a worker thread
+   (`app/auth/security.py: verify_password_in_thread`), so a slow hash
+   doesn't stall other requests, and upgrades an old hash if needed.
+4. On success, the attempt's count is taken back
+   (`app/console/throttle.py: forget`), and
+   `app/console/auth.py: log_in` stores the workspace in the signed
+   session cookie.
 5. Later pages declare `app/console/routes.py: require_login`. Without a
    login it raises `LoginRequired`, and
    `app/console/routes.py: redirect_to_login` sends the browser back to
@@ -193,14 +210,16 @@ everywhere.
 | Validator | The code that decides whether SQL is a single, harmless `SELECT`. | `app/query/validation.py: validate_and_normalize` |
 | sqlglot, AST | sqlglot parses SQL into a tree (an AST), so we can check every part of it, not just the start. | `app/query/validation.py` |
 | CTE | A `WITH x AS (...)` sub-query. It can hide a write, so the validator searches the whole tree. | `app/query/validation.py: WRITE_NODE_TYPES` |
-| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The only exceptions are read-only date/time builtins like `age()`, called without a schema. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
+| Function allowlist | Functions sqlglot doesn't know are refused, since one could secretly write. The only exceptions are read-only date/time builtins like `age()`, called without a schema or quotes. | `app/query/validation.py: ALLOWED_ANONYMOUS_FUNCTIONS` |
 | `SECURITY DEFINER` | A Postgres function that runs with its owner's rights, so it can write even when called by a read-only login. | `docs/threat-model.md` |
+| Look-alike function | A function outside `pg_catalog` with a builtin's name, such as `public.age(text)`. Postgres calls it instead of the builtin when its argument types fit better, so a query that calls one is refused. Functions of an extension a superuser owns don't count. | `app/query/lookalikes.py: refuse_lookalikes` |
 | Cost check | Asking Postgres how expensive a query would be, and refusing it over a threshold. | `app/query/cost_check.py: check_cost` |
 | `EXPLAIN` | The Postgres command that returns a query's plan and estimated cost without running it. | `app/query/cost_check.py: check_cost` |
 | Statement timeout | A Postgres setting that kills a query after N seconds. Set per transaction with `SET LOCAL`. | `app/query/service.py: _run_with_retry` |
 | `READ ONLY` transaction | Postgres refuses every write in it, even from a `SECURITY DEFINER` function. | `app/db.py: create_target_engine` |
 | Read-only role | A database login that can only `SELECT`. A second guard behind the transaction. | `scripts/provision_readonly_role.py` |
-| Row cap | At most 200 rows go back to the model; more are cut off with a note. | `app/query/service.py: _fetch_capped` |
+| Row cap, byte cap | At most 200 rows and 1 MB go back to the model, and a text value over 10 KB is shortened; a cut result says so with a note. | `app/query/result_cap.py: fetch_capped` |
+| Length ceiling | `repeat()`, `lpad()` and `rpad()` may build at most 1,000 characters, given as a plain number, so one call can't build a huge string. | `app/query/validation.py: MAX_GENERATED_LENGTH` |
 | Rate limit | At most N calls per workspace per hour. A fixed window: the count resets when the hour is up. Counted in the database. | `app/auth/rate_limit.py: check_and_increment` |
 | Audit log | One `QueryExecution` row per attempt, refused or not. The console shows it. | `app/query/service.py: write_audit` |
 | Caller-safe error | What a failed query may tell the caller and the audit log: fixed text for a broken connection, otherwise only Postgres's message and hint. | `app/query/target.py: caller_safe_error` |
@@ -215,7 +234,7 @@ everywhere.
 | Argon2 | A slow, memory-hard password hash. Older scrypt hashes are upgraded at login. | `app/auth/security.py: hash_password` |
 | CSRF | A trick where another site makes your browser submit a form. Every console form carries a token to stop it. | `app/console/csrf.py: verify_csrf` |
 | Session cookie | The signed cookie that remembers a console login. | `app/main.py`, `app/console/auth.py: log_in` |
-| Throttle | Per-IP limits on failed logins, failed signups and demo signups. | `app/console/throttle.py: is_blocked` |
+| Throttle | Per-IP limits on failed logins, failed signups and demo signups. Login and signup attempts are counted before they're checked, so parallel guesses can't pass the limit. | `app/console/throttle.py: claim_attempt` |
 | Invite code | A single-use code that lets someone connect their own database at signup. | `app/auth/signup.py: create_invite` |
 | Alembic migration | A versioned script that changes the bookkeeping database's tables. | `migrations/versions/` |
 | Span, trace | OpenTelemetry's record of one timed step (span) and a whole request (trace). Off unless an endpoint is set. | `app/tracing.py: stage` |
@@ -229,10 +248,12 @@ everywhere.
 - **Run everything locally:** the README's "Run it yourself" section.
   Checks, as CI runs them: `uv run ruff check .`,
   `uv run pyright app/ tests/ scripts/`, `uv run pytest` (needs the
-  test database from the README).
+  test database from the last section), and a secret scan of every
+  commit, `gitleaks git --no-banner --redact .`.
 - **Change a limit:** set it in `.env`. Each has a comment in
   `.env.example`, and the defaults live in `app/config.py: Settings`.
-  Row cap: `APP_MAX_RESULT_ROWS`. Timeouts: `APP_QUERY_TIMEOUT_SECONDS`,
+  Row and byte caps: `APP_MAX_RESULT_ROWS`, `APP_MAX_RESULT_BYTES`,
+  `APP_MAX_VALUE_BYTES`. Timeouts: `APP_QUERY_TIMEOUT_SECONDS`,
   `APP_EXPLAIN_TIMEOUT_SECONDS`. Cost: `APP_COST_THRESHOLD`. Rate limits:
   `APP_DEMO_RATE_LIMIT` and `APP_SAMPLE_RATE_LIMIT`, over a window of
   `APP_DEMO_RATE_LIMIT_WINDOW_SECONDS` (this one isn't in
@@ -244,6 +265,9 @@ everywhere.
   `tests/test_validation.py` (or a list like it) and to
   `test_allowed_date_time_builtins_run_on_postgres` in
   `tests/test_query_safety.py`.
+- **Change what counts as a look-alike:** edit `FIND_LOOKALIKE` in
+  `app/query/lookalikes.py`, the tests in `tests/test_lookalikes.py`,
+  and the look-alike section of `docs/threat-model.md`.
 - **Add a tool:**
   1. Write the logic in `app/query/`.
   2. Add a scope constant to `app/auth/scopes.py` and to `ALL_TOOLS` and
@@ -266,3 +290,32 @@ everywhere.
   `app/console/static/main.js` (CI checks they match).
 - **Deploy:** follow the steps in [the runbook](../deploy/RUNBOOK.md), in
   order: sync dependencies and migrate before restarting.
+
+## Tests, tracing and local development
+
+In Safari over plain `http://`, set `APP_CONSOLE_COOKIE_HTTPS_ONLY=false`
+in `.env`, or the console login won't stick.
+
+**Tracing** (optional): set `OTEL_EXPORTER_OTLP_ENDPOINT` (for example
+`http://127.0.0.1:4318`) and every tool call is exported as an
+OpenTelemetry trace: the MCP SDK's span for the request, with one child
+span per stage (`authenticate`, `rate_limit`, `validate`, `cost_check`,
+`execute`, `audit`), joined to the calling agent's trace through the
+request's `_meta`. Off without the variable. No SQL text or rejection
+reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
+`app/tracing.py`.
+
+**Tests** (against real Postgres, run in CI on every push) need a
+disposable database. The suite drops every table after each test and
+refuses to run unless the database name contains `test`. It also needs
+`CREATEROLE`, because the red-team tests create real throwaway roles:
+
+```bash
+docker run -d --name mcp-test-db -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=test -p 55432:5432 postgres:16-alpine
+# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
+uv run pytest
+```
+
+The console's compiled JavaScript is committed (the server needs no Node);
+CI fails if it drifts from `static-src/main.ts`.

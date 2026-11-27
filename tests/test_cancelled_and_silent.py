@@ -22,22 +22,29 @@ from app.query.target import TARGET_UNREACHABLE
 
 pytestmark = pytest.mark.asyncio
 
-# Passes the validator and the cost check (Postgres guesses 1,000 rows for a
-# function), then counts for several seconds.
-SLOW_SQL = "select count(*) from generate_series(1, 100000000) as slow_series"
+# Passes the validator and the cost check, then counts for several seconds.
+# The bound is a subquery because Postgres 12+ estimates generate_series
+# with constant bounds at its real size (cost 1.25 million here), which
+# the cost check refuses; it can't see a subquery's value while planning.
+SLOW_SQL = "select count(*) from generate_series(1, (select 100000000)) as slow_series"
 SILENT_TIMEOUT_SECONDS = 1
 
 
 async def _wait_until_running(fragment: str) -> None:
-    """Returns once a query containing `fragment` is running on the target."""
+    """Returns once a query containing `fragment`, started after this
+    call, is running on the target. An earlier run's cancelled query can
+    still be counting for a few seconds, so it mustn't count."""
+    async with engine.connect() as conn:
+        since = (await conn.execute(text("select clock_timestamp()"))).scalar_one()
     for _ in range(200):
         async with engine.connect() as conn:
             result = await conn.execute(
                 text(
                     "select count(*) from pg_stat_activity "
-                    "where state = 'active' and query ilike :pattern and pid <> pg_backend_pid()"
+                    "where state = 'active' and query ilike :pattern and pid <> pg_backend_pid() "
+                    "and query_start > :since"
                 ),
-                {"pattern": f"%{fragment}%"},
+                {"pattern": f"%{fragment}%", "since": since},
             )
             if result.scalar_one() > 0:
                 return

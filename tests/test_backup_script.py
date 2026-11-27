@@ -129,3 +129,15 @@ def test_a_failed_backup_leaves_no_plaintext_dump(home: Path, failing_tool: str)
 
     assert result.returncode != 0
     assert [name for name in _backup_files(home) if not name.endswith(".dump.age")] == []
+
+
+def test_a_backup_only_ever_uploads_to_s3(home: Path) -> None:
+    """Old copies in S3 expire by the bucket's lifecycle rule; the key
+    can't delete, so the script mustn't try."""
+    _env_file(home)
+    result = _run_backup(home)
+
+    assert result.returncode == 0, result.stderr
+    rclone_calls = [line for line in _calls(home).splitlines() if line.startswith("rclone ")]
+    assert rclone_calls
+    assert all(line.startswith("rclone copy ") for line in rclone_calls), rclone_calls

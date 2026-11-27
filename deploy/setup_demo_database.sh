@@ -17,7 +17,7 @@
 #      database by default; the app's own user keeps its access).
 #   2. Loads Pagila into it with scripts/load_pagila_dataset.py.
 #   3. Revokes CREATE on the schema and TEMP on the database from PUBLIC,
-#      then creates pagila_ro with scripts/provision_readonly_role.py:
+#      and reading pg_stat_activity, pg_roles and pg_database, then creates pagila_ro with scripts/provision_readonly_role.py:
 #      SELECT only, no EXECUTE on the schema's functions.
 #   4. Locks pagila_owner (NOLOGIN, password removed).
 #   5. Proves pagila_ro can read, can't write, and can't open the
@@ -88,9 +88,18 @@ echo "== 3. Closing PUBLIC grants, then creating read-only role $RO"
 # "GRANT ALL ON SCHEMA public TO PUBLIC", and TEMP is granted to PUBLIC on
 # every new database by default. This database exists only for the demo,
 # so nothing else depends on either.
+# Every demo account shares $RO, and Postgres shows a role its own
+# sessions' query text, so pg_stat_activity would show each demo user the
+# others' queries; pg_roles and pg_database list the server's other logins
+# and databases. These grants are per database, so only $DB changes, and
+# the schema reads list_tables and describe_table make don't use them.
 as_postgres -d "$DB" <<SQL
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE TEMPORARY ON DATABASE $DB FROM PUBLIC;
+REVOKE SELECT ON pg_catalog.pg_stat_activity FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION pg_catalog.pg_stat_get_activity(integer) FROM PUBLIC;
+REVOKE SELECT ON pg_catalog.pg_roles FROM PUBLIC;
+REVOKE SELECT ON pg_catalog.pg_database FROM PUBLIC;
 SQL
 RO_PW=$("$PY" -c '
 import asyncio, os
@@ -109,7 +118,10 @@ echo "   reads: $films films"
 for statement in "CREATE TABLE should_fail (x int)" \
                  "CREATE TEMP TABLE should_fail_tmp (x int)" \
                  "UPDATE film SET title = title WHERE false" \
-                 "DELETE FROM rental WHERE false"; do
+                 "DELETE FROM rental WHERE false" \
+                 "SELECT count(*) FROM pg_stat_activity" \
+                 "SELECT count(*) FROM pg_roles" \
+                 "SELECT count(*) FROM pg_database"; do
     if ro_psql -d "$DB" -c "$statement" >/dev/null 2>&1; then
         echo "   FAILED: '$statement' was allowed" >&2
         exit 1

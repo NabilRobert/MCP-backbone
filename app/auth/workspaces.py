@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import ApiKey, ConsoleCredential, InviteCode, RateLimitCounter, Workspace
-from app.auth.security import generate_api_key, hash_api_key, hash_password
+from app.auth.security import generate_api_key, hash_api_key, hash_password_in_thread
 from app.query.models import DataSourceConnection, QueryExecution, SchemaCache
 
 # Every table holding rows that belong to a workspace, in a safe order to
@@ -85,7 +85,7 @@ async def create_workspace(
         ConsoleCredential(
             workspace_id=workspace.id,
             username=spec.console_username,
-            password_hash=hash_password(spec.console_password),
+            password_hash=await hash_password_in_thread(spec.console_password),
         )
     )
     api_key = generate_api_key()

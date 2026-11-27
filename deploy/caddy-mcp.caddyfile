@@ -34,6 +34,10 @@
 # The host file is what the image is built from, so the next rebuild keeps it.
 
 mcp.my.id {
+	# HSTS: once a browser has seen this over HTTPS, it never tries plain
+	# http for this host for a year, so the console cookie can't be asked
+	# for over http first. Only mcp.my.id, no includeSubDomains.
+	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy https://172.18.0.1:8443 {
 		# For an HTTPS upstream, Caddy sends the UPSTREAM's address as the
 		# Host header by default (here 172.18.0.1:8443). The MCP endpoint's

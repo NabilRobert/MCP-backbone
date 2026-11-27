@@ -49,6 +49,15 @@ of that safety decision, (b) bookkeeping around who's allowed to ask, or
    expensive would this be?" (via `EXPLAIN`) without actually running
    it, and rejects it if the estimate is too high.
 
+   **`app/query/lookalikes.py`** runs on the target just before that,
+   and again before the real run: it refuses a query when a function it
+   calls also exists outside `pg_catalog` on the search path, since
+   Postgres could pick that look-alike over the builtin.
+
+   **`app/query/result_cap.py`** reads the real run's result and stops
+   at 200 rows or 1 MB, shortening any text value over 10 KB, since one
+   cheap query can still return a huge answer.
+
 5. **`app/query/service.py`** — "actually run it." This is where
    `run_query` and `list_tables` live for real. It ties the above two
    checks together, adds a timeout so a slow query gets killed rather
@@ -225,12 +234,17 @@ setting things up:
 - **`backup_bookkeeping.sh`** — the VPS's nightly backup (installed as
   `~/bin/backup_bookkeeping.sh`, run by cron at 03:17). Dumps the
   bookkeeping database, encrypts it with `age`, and uploads it to S3,
-  keeping the last 14 locally and remotely. Reads every secret from
+  keeping the last 14 locally. It never deletes from S3: copies there
+  expire by the bucket's lifecycle rule (`s3-lifecycle.json`), and the
+  key's policy (`s3-backup-key-policy.json`) denies deleting. Reads every secret from
   `.env` at run time, so this file contains none.
 - **`mcp-backbone.service`** — the systemd unit that runs the server
   (restarts on failure, starts at boot). uvicorn serves HTTPS itself
-  on port 8443. The public address is `https://mcp.my.id`, through the
-  Caddy proxy below; 8443 also still answers directly.
+  on `172.18.0.1:8443`, the host's address on Caddy's Docker network, so
+  only Caddy and the host can reach it. The public address is
+  `https://mcp.my.id`, through the Caddy proxy below. The unit sandboxes
+  the service: a read-only filesystem, the rest of `/home` and the
+  Docker socket hidden, no privileges, and a memory ceiling.
   Install instructions are in its header.
 - **`certbot-deploy-hook.sh`** — runs after each automatic certificate
   renewal: copies the new cert to where the service can read it, then
@@ -246,9 +260,11 @@ setting things up:
   `APP_TARGET_DATABASE_URL` at it. Stops before touching the app if any
   check fails.
 - **`crontab`** — the one cron line that runs the nightly backup.
-- **`firewall.sh`** — the host firewall (ufw): 22/80/443 open, 8443 only
-  from Caddy's Docker network, everything else dropped. Schedules its own
-  undo before enabling, and rolls back if Caddy loses the app.
+- **`firewall.sh`** — this project's host firewall rules (ufw): 22/80/443
+  open, 8443 only from Caddy's Docker network. It adds only its own rules,
+  tagged `mcp-backbone`, so other projects' rules on the shared server
+  stay. If ufw is off, it sets deny-incoming, schedules its own undo
+  before enabling, and rolls back if Caddy loses the app.
 - **`RUNBOOK.md`** — routine operations, monitoring setup, restore, and a
   rebuild-from-nothing checklist.
 

@@ -18,8 +18,8 @@ dependencies = [
     "itsdangerous>=2.2",
     "cryptography>=43",
     "argon2-cffi>=23.1",
-    "opentelemetry-sdk>=1.45",
-    "opentelemetry-exporter-otlp-proto-http>=1.45",
+    "opentelemetry-sdk>=1.45.2",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.2",
     "sqlparse>=0.5",
 ]
 

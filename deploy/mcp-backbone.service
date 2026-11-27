@@ -1,14 +1,16 @@
 # /etc/systemd/system/mcp-backbone.service on the VPS.
 # Install: sudo cp deploy/mcp-backbone.service /etc/systemd/system/
 #          sudo systemctl daemon-reload && sudo systemctl restart mcp-backbone
+# Check:   systemd-analyze security mcp-backbone   (lower is better)
 # Secrets: none here. The app reads .env from WorkingDirectory.
 #
 # Public traffic arrives at https://mcp.my.id (port 443) through a Caddy
-# reverse proxy container (see
-# deploy/caddy-mcp.caddyfile), which forwards to uvicorn on 8443. With
-# deploy/firewall.sh applied, 8443 accepts connections only from Caddy's
-# Docker network. uvicorn terminates TLS itself on 8443. The cert comes from Let's Encrypt
-# via a Cloudflare DNS-01 challenge. certbot renews it, and
+# reverse proxy container (see deploy/caddy-mcp.caddyfile), which forwards
+# to uvicorn on 172.18.0.1:8443: the host's address on Caddy's Docker
+# network, so only that network and the host itself can connect, whatever
+# the firewall says (deploy/firewall.sh limits 8443 too). uvicorn
+# terminates TLS itself on 8443. The cert comes from Let's Encrypt via a
+# Cloudflare DNS-01 challenge. certbot renews it, and
 # deploy/certbot-deploy-hook.sh copies it to /etc/mcp-backbone/tls/ (this
 # service runs as ubuntu, which can't read /etc/letsencrypt/live) and
 # restarts the service.
@@ -20,17 +22,67 @@
 # --timeout-graceful-shutdown 5: without it, a restart hangs until systemd's
 # 90s stop timeout, because uvicorn waits for open MCP streaming connections
 # (e.g. a connected Claude Code) to close on their own.
+#
+# The sandbox below: ubuntu is in the docker group, which is as good as
+# root, so a bug in this app mustn't be able to use what ubuntu can. The
+# app writes no files: it reads its code, .venv, .env and the TLS files,
+# and talks to Postgres and its clients over TCP. Moving to a dedicated
+# user outside the docker group is a later step (deploy/RUNBOOK.md, "Run
+# as a dedicated user").
 [Unit]
 Description=Database MCP server (FastAPI + uvicorn)
-After=network-online.target postgresql.service
+# docker.service: 172.18.0.1 exists only once Docker has made Caddy's network.
+After=network-online.target postgresql.service docker.service
 Wants=network-online.target postgresql.service
 
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/MCP-backbone
-ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-certfile /etc/mcp-backbone/tls/fullchain.pem --ssl-keyfile /etc/mcp-backbone/tls/privkey.pem --proxy-headers --forwarded-allow-ips 172.18.0.0/16 --timeout-graceful-shutdown 5
+ExecStart=/home/ubuntu/MCP-backbone/.venv/bin/uvicorn app.main:app --host 172.18.0.1 --port 8443 --ssl-certfile /etc/mcp-backbone/tls/fullchain.pem --ssl-keyfile /etc/mcp-backbone/tls/privkey.pem --proxy-headers --forwarded-allow-ips 172.18.0.0/16 --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=3
+# The checkout is read-only to the service, so Python can't cache bytecode there.
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Files: everything read-only, and the rest of /home hidden (other
+# projects' .env files, SSH keys). Only the checkout is mapped back in,
+# plus uv's own Python in case .venv points into it ("-" skips a path
+# that doesn't exist).
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/ubuntu/MCP-backbone -/home/ubuntu/.local/share/uv/python
+PrivateTmp=true
+PrivateDevices=true
+UMask=0077
+# The Docker socket would let the service start a root container.
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+
+# Privileges: none to gain, none to keep.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+# Network: IPv4 and IPv6 for Postgres and clients, UNIX for logging,
+# NETLINK for glibc's address lookup.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+# Resources: the server is shared, so a runaway result or a burst of
+# logins restarts this service instead of starving the others.
+# MemoryHigh slows it down first. Check the live figure ("Memory:" in
+# systemctl status mcp-backbone) and keep MemoryMax well above it.
+MemoryHigh=600M
+MemoryMax=800M
+TasksMax=256
 
 [Install]
 WantedBy=multi-user.target

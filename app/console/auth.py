@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.auth.models import ConsoleCredential, Workspace
-from app.auth.security import hash_password, needs_rehash, verify_password
+from app.auth.security import (
+    hash_password,
+    hash_password_in_thread,
+    needs_rehash,
+    verify_password_in_thread,
+)
 from app.auth.signup import MIN_PASSWORD_LENGTH
 from app.console.csrf import rotate_csrf_token
 
@@ -39,14 +44,14 @@ async def verify_console_login(
     credential = result.scalar_one_or_none()
 
     if credential is None:
-        verify_password(password, _DUMMY_PASSWORD_HASH)  # always do the slow check
+        await verify_password_in_thread(password, _DUMMY_PASSWORD_HASH)  # always do the slow check
         return None
-    if not verify_password(password, credential.password_hash):
+    if not await verify_password_in_thread(password, credential.password_hash):
         return None
     if needs_rehash(credential.password_hash):
         # The only moment the plain-text password is available, so the
         # only moment an old hash can be upgraded to the current scheme.
-        credential.password_hash = hash_password(password)
+        credential.password_hash = await hash_password_in_thread(password)
         await session.commit()
     return await session.get(Workspace, credential.workspace_id)
 
@@ -114,6 +119,6 @@ async def reset_console_password(session: AsyncSession, username: str, new_passw
     credential = result.scalar_one_or_none()
     if credential is None:
         raise ResetRefused(f"no console login named '{username}'")
-    credential.password_hash = hash_password(new_password)
+    credential.password_hash = await hash_password_in_thread(new_password)
     credential.session_version += 1
     await session.commit()

@@ -11,21 +11,14 @@ sample database ([how](#use-it)).
 
 **Stack:** Python 3.12, FastAPI, the MCP Python SDK (Streamable HTTP),
 SQLAlchemy (async) with asyncpg, sqlglot, PostgreSQL 16, Alembic. The
-console is server-rendered Jinja2 with a little TypeScript. It's deployed
-on a VPS behind Caddy, run by systemd, with encrypted backups to S3.
-
-| 1 · Ask a question | 2 · Try to change data |
-|---|---|
-| ![Claude explores the schema, then answers with one read-only query](app/console/static/demo/step1.gif) | ![The server refuses a DELETE: only SELECT statements are allowed](app/console/static/demo/step2.gif) |
-
-Every query, including the refused one, then shows up in the console's
-[audit trail](app/console/static/demo/step3.png).
+console is server-rendered Jinja2 with a little TypeScript. Deployed on a
+small VPS; see [deploy/RUNBOOK.md](deploy/RUNBOOK.md).
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    C[Claude Code<br/>+ plugin] -->|HTTPS, Bearer key| P[Caddy<br/>mcp.my.id]
+    C[Claude Code<br/>+ plugin] -->|HTTPS, Bearer key| P[HTTPS proxy<br/>mcp.my.id]
     P --> S[MCP server<br/>FastAPI + uvicorn]
     S --> A{auth +<br/>rate limit}
     A --> V[validate SQL<br/>sqlglot AST]
@@ -47,7 +40,7 @@ might fail:
    built-in functions are allowed.
 3. **Cost check:** `EXPLAIN` estimates the cost before anything runs, and
    expensive queries are rejected.
-4. **Execution limits:** a statement timeout, and results capped at 200 rows.
+4. **Execution limits:** a statement timeout, and results capped at 200 rows and 1 MB.
 5. **The database itself:** every transaction is `READ ONLY`, and where
    possible the login is a read-only role too. Each covers a gap the other
    has (see the [threat model](docs/threat-model.md)).
@@ -58,24 +51,18 @@ might fail:
 Proven by an adversarial suite that sends writes straight to the database,
 bypassing the validator: [red-team results](docs/red-team.md).
 
-**How well an AI uses it:** `gpt-5-mini` answered 29 of 30 hand-written
-questions over the demo database correctly under strict grading (exact
-columns and values), 30 of 30 leniently. Every miss across both runs is
-explained in the [benchmark report](docs/benchmark.md), including a tool fix and a
-question fix that came out of the first run. On the 70-task v2 benchmark, a
-small local model (`qwen3.5:4b`, $0) answered 64% strictly, and none of its
-34 write attempts got through.
+**How well an AI uses it:** on a 70-task benchmark, a small local model
+(`qwen3.5:4b`) answered 64% correctly under strict grading, and none of its
+34 write attempts got through ([benchmark](docs/benchmark.md)).
 
 ## Use it
 
 1. **Sign up** at https://mcp.my.id with a username and a password of 12+
-   characters. You get the demo database (Pagila, a DVD-rental store).
-   To query **your own Postgres** instead, open "Connect your own database"
-   and enter an invite code and its connection URL (stored encrypted; a
-   read-only login is recommended).
-2. **Copy your API key.** It's shown once. Issue a new one any time from
-   the console's Keys page, optionally with less access (for example, schema
-   only, for a client that never needs to read rows).
+   characters. You get the demo database (Pagila, a DVD-rental store). An
+   invite code lets you connect **your own Postgres** instead (its URL is
+   stored encrypted; a read-only login is recommended).
+2. **Copy your API key.** It's shown once. Issue more, optionally with less
+   access, from the console's Keys page.
 3. **Install the plugin** in Claude Code, and enter the key when asked:
    ```
    /plugin install mcp-backbone --marketplace NabilRobert/MCP-backbone
@@ -83,9 +70,8 @@ small local model (`qwen3.5:4b`, $0) answered 64% strictly, and none of its
 4. **Ask.** For example, "which film category has the most films?". Every
    query shows up on your console's dashboard.
 
-Per workspace, per hour: 5 queries and 30 row samples by default (the
-operator can set a different allowance for one workspace); listing and
-describing tables is free. Demo signups are capped per network and per day.
+Per workspace, per hour: 5 queries and 30 row samples by default; listing
+and describing tables is free.
 
 ## Run it yourself
 
@@ -98,80 +84,35 @@ uv run uvicorn app.main:app --reload
 
 One process serves the console (`/console`), the MCP endpoint (`/mcp/`) and
 `/healthz`. Invite someone with
-`python -m scripts.create_invite --note "alice"`. Deploying, monitoring,
-restoring and rebuilding the production server:
-[deploy/RUNBOOK.md](deploy/RUNBOOK.md).
+`uv run python -m scripts.create_invite --note "<who it's for>"`.
 
-**Tracing** (optional): set `OTEL_EXPORTER_OTLP_ENDPOINT` (for example
-`http://127.0.0.1:4318`) and every tool call is exported as an
-OpenTelemetry trace: the MCP SDK's span for the request, with one child
-span per stage (`authenticate`, `rate_limit`, `validate`, `cost_check`,
-`execute`, `audit`), joined to the calling agent's trace through the
-request's `_meta`. Off without the variable. No SQL text or rejection
-reasons are recorded unless `APP_OTEL_CAPTURE_CONTENT=true`. See
-[app/tracing.py](app/tracing.py).
-
-**Tests** (against real Postgres, run in CI on every push) need a
-disposable database. The suite drops every table after each test and
-refuses to run unless the database name contains `test`. It also needs
-`CREATEROLE`, because the red-team tests create real throwaway roles:
-
-```bash
-docker run -d --name jarvis-mcp-test-db -e POSTGRES_PASSWORD=test \
-  -e POSTGRES_DB=test -p 55432:5432 postgres:16-alpine
-# .env: APP_TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/test
-uv run pytest
-```
-
-The console's compiled JavaScript is committed (the server needs no Node);
-CI fails if it drifts from `static-src/main.ts`.
+Running the tests (they need a disposable Postgres that can create roles)
+and turning on tracing: [the guide](docs/guide.md#tests-tracing-and-local-development).
 
 ## Layout
 
 ```
-app/
-  auth/       workspaces, API keys, console logins, signup, rate limits
-  query/      validation, cost check, execution, address guard, audit log
-  console/    server-rendered web console (Jinja2 + a little TypeScript)
-  mcp/        the MCP tools: a thin adapter, no business logic
-  benchmark/  text-to-SQL eval cases and grading
-migrations/   Alembic migrations for the bookkeeping database
-tests/        tests against real Postgres, incl. the red-team suite
-static-src/   the console's TypeScript (compiled into app/console/static)
-plugin/       the Claude Code plugin (MCP registration + query skill)
-deploy/       systemd unit, Caddy block, firewall, backups, runbook
-scripts/      operator CLIs: invites, seeding, datasets, benchmark
-docs/         architecture, threat model, results, build log, planning
+app/auth/       workspaces, API keys, console logins, signup, rate limits
+app/query/      validation, cost check, execution, address guard, audit log
+app/console/    the web console
+app/mcp/        the MCP tools: a thin adapter, no business logic
+app/benchmark/  text-to-SQL eval cases and grading
+migrations/     Alembic migrations for the bookkeeping database
+tests/          tests against real Postgres, incl. the red-team suite
+static-src/     the console's TypeScript (compiled into app/console/static)
+plugin/         the Claude Code plugin (MCP registration + query skill)
+deploy/         deployment files and the runbook
+scripts/        operator CLIs: invites, seeding, datasets, benchmark
+docs/           architecture, threat model, results, build log, planning
 ```
 
 ## Docs
 
-How it works:
-- [Guide](docs/guide.md): a plain-English walk through one request,
-  a glossary, and where to change things. Start here if you're new.
-- [Architecture](docs/architecture.md): a guided tour of the code, following a
-  request through it.
-- [Decisions (ADRs)](docs/planning/phase-5-architecture-decisions.md): ten
-  decisions, each with alternatives, consequences and sources.
-- [Threat model](docs/threat-model.md): what it defends against, how, and
-  what it doesn't.
-
-Results and evidence:
-- [Red team](docs/red-team.md): the adversarial suite and its results,
-  including the limits it demonstrates.
-- [Benchmark](docs/benchmark.md): how well an AI agent answers real questions
-  through it, graded strictly and leniently, with every miss explained.
-
-Running it:
-- [Runbook](deploy/RUNBOOK.md): running, monitoring, restoring and
-  rebuilding the production server.
-
-History:
-- [Build log](docs/journey.md): what broke, what was assumed and turned out
-  wrong, and why each decision landed where it did.
-- [Planning trail](docs/planning/README.md): the specs and plans written
-  before the build, from problem brief to sliced work plan, including the
-  spikes that tested the riskiest assumptions.
+- [Guide](docs/guide.md): start here. Screenshots, one request step by step,
+  a glossary, and where to change things.
+- [Architecture](docs/architecture.md), and the [decisions and plans](docs/planning/README.md) behind it.
+- [Threat model](docs/threat-model.md), with [red-team results](docs/red-team.md).
+- [Build log](docs/journey.md): what broke, and what it taught.
 
 ## License
 
